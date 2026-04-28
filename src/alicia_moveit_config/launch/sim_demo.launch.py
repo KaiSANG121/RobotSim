@@ -4,13 +4,11 @@ sim_demo.launch.py — Alicia-D 6-DOF 仿真系统统一启动文件
 启动顺序:
   1. Gazebo Sim (bin_scene.sdf)
   2. robot_state_publisher
-  3. joint_state_broadcaster spawner
-  4. Alicia_controller spawner (等 jsb 完成)
-  5. Gripper_controller spawner (等 Alicia 完成)
-  6. MoveIt move_group (等控制器就绪)
-  7. ros_gz_bridge (相机数据桥接)
-  8. static_transform_publisher (world -> rgbd_camera_frame)
-  9. RViz (可选)
+  3. controller spawner (joint_state_broadcaster + Alicia + Gripper)
+  4. MoveIt move_group (等控制器就绪)
+  5. ros_gz_bridge (相机数据桥接)
+  6. static_transform_publisher (world -> rgbd_camera_frame)
+  7. RViz (可选)
 
 用法:
   ros2 launch alicia_moveit_config sim_demo.launch.py
@@ -102,71 +100,53 @@ def launch_setup(context, *args, **kwargs):
     )
 
     # ------------------------------------------------------------------ #
-    # 3–5. Controller spawners (序列化)
+    # 3. Controller spawner
     # ------------------------------------------------------------------ #
-    joint_state_broadcaster_spawner = Node(
+    controller_spawner = Node(
         package='controller_manager',
         executable='spawner',
-        arguments=['joint_state_broadcaster', '-c', '/controller_manager'],
-        output='screen',
-    )
-
-    arm_controller_spawner = Node(
-        package='controller_manager',
-        executable='spawner',
-        arguments=['Alicia_controller', '-c', '/controller_manager'],
-        output='screen',
-    )
-
-    gripper_controller_spawner = Node(
-        package='controller_manager',
-        executable='spawner',
-        arguments=['Gripper_controller', '-c', '/controller_manager'],
+        arguments=[
+            'joint_state_broadcaster',
+            'Alicia_controller',
+            'Gripper_controller',
+            '-c', '/controller_manager',
+            '--controller-manager-timeout', '60',
+            '--service-call-timeout', '60',
+            '--switch-timeout', '60',
+        ],
         output='screen',
     )
 
     # ------------------------------------------------------------------ #
     # spawn_robot 进程退出后, gz_ros2_control 仍需若干秒在 ign gazebo
     # 进程内初始化 controller_manager 和 hardware interface。
-    # 之前在 spawn_robot.exit 后立即启 spawner, 撞上 controller_manager
-    # 初始化 race window, 表现为 spawner 报 "Controller already loaded"
-    # 但 controller_manager 又说 "no controller with this name exists",
-    # 三个 spawner 全部 exit 1, 控制器从未真正 active。
-    # 解决: spawn_robot 退出后再额外延时 5s 给 gz_ros2_control 充分时间
-    # 注册 controller_manager service, 然后 jsb / arm 顺次启动,
-    # gripper 等 arm 启动完成 (其 process exit) 再启。
+    # 使用单个 spawner 一次性加载并激活所有控制器，避免串联 spawner
+    # 在 controller_manager 初始化 race window 中产生半初始化状态。
     # ------------------------------------------------------------------ #
-    delay_jsb_spawner = RegisterEventHandler(
+    delay_controller_spawner = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=spawn_robot,
             on_exit=[
-                TimerAction(period=5.0, actions=[joint_state_broadcaster_spawner]),
+                TimerAction(period=12.0, actions=[controller_spawner]),
             ],
         )
     )
 
-    delay_arm_spawner = RegisterEventHandler(
-        event_handler=OnProcessExit(
-            target_action=joint_state_broadcaster_spawner,
-            on_exit=[arm_controller_spawner],
-        )
-    )
-
-    delay_gripper_spawner = RegisterEventHandler(
-        event_handler=OnProcessExit(
-            target_action=arm_controller_spawner,
-            on_exit=[gripper_controller_spawner],
-        )
-    )
-
     # ------------------------------------------------------------------ #
-    # 6. MoveIt move_group (等所有控制器就绪)
+    # 4. MoveIt move_group (等所有控制器就绪)
     # ------------------------------------------------------------------ #
     move_group_params = {
         'allow_trajectory_execution': True,
         'capabilities': '',
         'disable_capabilities': '',
         'monitor_dynamics': False,
+
+        # WSL2 software rendering can run Gazebo much slower than wall clock.
+        # Give MoveIt enough execution budget before it cancels a valid plan.
+        'trajectory_execution.allowed_execution_duration_scaling': 5.0,
+        'trajectory_execution.allowed_goal_duration_margin': 2.0,
+        'trajectory_execution.execution_duration_monitoring': True,
+        'trajectory_execution.allowed_start_tolerance': 0.05,
     }
 
     move_group_node = Node(
@@ -182,13 +162,13 @@ def launch_setup(context, *args, **kwargs):
 
     delay_move_group = RegisterEventHandler(
         event_handler=OnProcessExit(
-            target_action=gripper_controller_spawner,
+            target_action=controller_spawner,
             on_exit=[move_group_node],
         )
     )
 
     # ------------------------------------------------------------------ #
-    # 7. ros_gz_bridge — 相机数据桥接
+    # 5. ros_gz_bridge — 相机数据桥接
     #
     # ogre1 兼容方案: rgbd_camera 拆为独立 camera + depth_camera 两个传感器后，
     # GZ 端实际发布:
@@ -215,7 +195,7 @@ def launch_setup(context, *args, **kwargs):
     )
 
     # ------------------------------------------------------------------ #
-    # 8. static_transform_publisher — world -> rgbd_camera_frame
+    # 6. static_transform_publisher — world -> rgbd_camera_frame
     #    rgbd_camera_frame follows the optical convention:
     #      +Z = depth direction (downward in world), +X = image right, +Y = image down.
     # ------------------------------------------------------------------ #
@@ -273,9 +253,7 @@ def launch_setup(context, *args, **kwargs):
         gz_sim,
         robot_state_publisher,
         spawn_robot,
-        delay_jsb_spawner,
-        delay_arm_spawner,
-        delay_gripper_spawner,
+        delay_controller_spawner,
         delay_move_group,
         ros_gz_bridge,
         camera_tf_publisher,

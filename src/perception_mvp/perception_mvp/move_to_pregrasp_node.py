@@ -4,14 +4,14 @@ move_to_pregrasp_node.py — 执行层节点（重写版 v2.1）
 修复了旧版的 3 个致命问题:
   1. Topic 匹配: 订阅 /perception/current_target_pregrasp_world (PointStamped)
                  ← 旧版错误订阅 /perception/current_pregrasp_pose_world (PoseStamped)
-  2. 类型转换: PointStamped → PoseStamped (补全抓取朝向 roll=180°, 使末端俯视抓取)
+  2. 类型转换: PointStamped → PoseStamped (补全抓取朝向，默认 grasp_rpy=(180°,90°,0°))
   3. 事件驱动: 响应 /task/enable_pregrasp (Bool) 和 /task/execute_goal_pose (Bool)
                ← 旧版独立轮询，不响应状态机指令
 
 新增:
   - 6 个反馈 Topic (pregrasp_running/done/success, goal_pose_running/done/success)
   - 夹爪控制: 响应 /task/gripper_command (Float64)
-  - 多线程安全: ReentrantCallbackGroup + MultiThreadedExecutor
+  - 单一 spin owner: 避免 pymoveit2 wait_until_executed() 与后台 executor 并发 spin
 """
 
 import math
@@ -20,10 +20,12 @@ import time
 from typing import Optional
 
 import rclpy
+from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
+from action_msgs.msg import GoalStatus
+from control_msgs.action import FollowJointTrajectory
 from geometry_msgs.msg import PointStamped, PoseStamped
 from std_msgs.msg import Bool, Float64
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
@@ -35,12 +37,12 @@ from pymoveit2 import MoveIt2
 def point_stamped_to_pose_stamped(
     point: PointStamped,
     roll_deg: float = 180.0,
-    pitch_deg: float = 0.0,
+    pitch_deg: float = 90.0,
     yaw_deg: float = 0.0,
 ) -> PoseStamped:
     """
     将 PointStamped 转换为 PoseStamped，补全末端抓取姿态。
-    默认 roll=180° 表示末端朝下（俯视抓取）。
+    默认 grasp_rpy=(180°,90°,0°)，用于尝试更容易到达的抓取朝向。
     """
     roll = math.radians(roll_deg)
     pitch = math.radians(pitch_deg)
@@ -87,16 +89,22 @@ class MoveToPregraspNode(Node):
         self.declare_parameter('target_frame', 'world')
         self.declare_parameter('position_tolerance', 0.01)
         self.declare_parameter('orientation_tolerance', 0.05)
-        self.declare_parameter('max_velocity', 0.10)
-        self.declare_parameter('max_acceleration', 0.10)
+        # WSL2 software rendering can make Gazebo lag behind the nominal
+        # trajectory timing, especially on the shoulder pitch joint.
+        self.declare_parameter('max_velocity', 0.03)
+        self.declare_parameter('max_acceleration', 0.03)
 
         # ===== Grasp orientation =====
         self.declare_parameter('grasp_roll_deg', 180.0)
-        self.declare_parameter('grasp_pitch_deg', 0.0)
+        self.declare_parameter('grasp_pitch_deg', 90.0)
         self.declare_parameter('grasp_yaw_deg', 0.0)
 
         # ===== Startup =====
         self.declare_parameter('startup_wait_sec', 5.0)
+
+        # ===== Gripper action timing =====
+        self.declare_parameter('gripper_motion_time_sec', 3.0)
+        self.declare_parameter('gripper_result_timeout_sec', 25.0)
 
         # Read params
         joint_names = self.get_parameter('joint_names').value
@@ -134,8 +142,17 @@ class MoveToPregraspNode(Node):
         self.startup_wait_sec = float(
             self.get_parameter('startup_wait_sec').value
         )
+        self.gripper_motion_time_sec = float(
+            self.get_parameter('gripper_motion_time_sec').value
+        )
+        self.gripper_result_timeout_sec = float(
+            self.get_parameter('gripper_result_timeout_sec').value
+        )
 
-        self.callback_group = ReentrantCallbackGroup()
+        # Keep action clients and user subscriptions in separate groups.
+        self.moveit_callback_group = ReentrantCallbackGroup()
+        self.subscriber_callback_group = ReentrantCallbackGroup()
+        self.gripper_callback_group = ReentrantCallbackGroup()
 
         # MoveIt2 接口
         self.moveit2 = MoveIt2(
@@ -146,7 +163,7 @@ class MoveToPregraspNode(Node):
             group_name=group_name,
             use_move_group_action=self.use_move_group_action,
             ignore_new_calls_while_executing=True,
-            callback_group=self.callback_group,
+            callback_group=self.moveit_callback_group,
         )
         self.moveit2.max_velocity = self.max_velocity
         self.moveit2.max_acceleration = self.max_acceleration
@@ -169,7 +186,7 @@ class MoveToPregraspNode(Node):
             '/perception/current_target_pregrasp_world',
             self._pregrasp_point_callback,
             10,
-            callback_group=self.callback_group,
+            callback_group=self.subscriber_callback_group,
         )
 
         # 决策层：使能 pregrasp 运动
@@ -178,7 +195,7 @@ class MoveToPregraspNode(Node):
             '/task/enable_pregrasp',
             self._enable_pregrasp_callback,
             10,
-            callback_group=self.callback_group,
+            callback_group=self.subscriber_callback_group,
         )
 
         # 决策层：放置目标位姿
@@ -187,7 +204,7 @@ class MoveToPregraspNode(Node):
             '/task/goal_pose_world',
             self._goal_pose_callback,
             10,
-            callback_group=self.callback_group,
+            callback_group=self.subscriber_callback_group,
         )
 
         # 决策层：触发放置运动
@@ -196,7 +213,7 @@ class MoveToPregraspNode(Node):
             '/task/execute_goal_pose',
             self._execute_goal_pose_callback,
             10,
-            callback_group=self.callback_group,
+            callback_group=self.subscriber_callback_group,
         )
 
         # 决策层：夹爪开合指令 (0.0=open, 0.05=closed)
@@ -205,7 +222,7 @@ class MoveToPregraspNode(Node):
             '/task/gripper_command',
             self._gripper_command_callback,
             10,
-            callback_group=self.callback_group,
+            callback_group=self.subscriber_callback_group,
         )
 
         # ===== Publishers — 反馈 Topics =====
@@ -229,11 +246,20 @@ class MoveToPregraspNode(Node):
             Bool, '/task/goal_pose_success', 10
         )
 
-        # 夹爪控制器 action topic
-        self.gripper_traj_pub = self.create_publisher(
-            JointTrajectory,
-            '/Gripper_controller/joint_trajectory',
-            10,
+        # 夹爪 action client (闭环, 替代旧的 JointTrajectory 裸 publish)
+        self.gripper_action_client = ActionClient(
+            self,
+            FollowJointTrajectory,
+            '/Gripper_controller/follow_joint_trajectory',
+            callback_group=self.gripper_callback_group,
+        )
+
+        # 夹爪反馈 topic, 给状态机判断 close/open 是否完成
+        self.gripper_done_pub = self.create_publisher(
+            Bool, '/task/gripper_done', 10
+        )
+        self.gripper_success_pub = self.create_publisher(
+            Bool, '/task/gripper_success', 10
         )
 
         self.get_logger().info(
@@ -307,26 +333,88 @@ class MoveToPregraspNode(Node):
     # Gripper control
     # ------------------------------------------------------------------
 
-    def _send_gripper_position(self, position: float):
+    def _execute_gripper_command(self, position: float) -> bool:
         """
-        通过 JointTrajectory 发送夹爪位置指令。
+        通过 FollowJointTrajectory action 发送夹爪位置指令并等待 result。
         position: 0.0 = open, 0.05 = closed
         """
+        if not self.gripper_action_client.wait_for_server(timeout_sec=2.0):
+            self.get_logger().warn(
+                'Gripper action server '
+                '/Gripper_controller/follow_joint_trajectory '
+                'not available within 2s'
+            )
+            return False
+
         traj = JointTrajectory()
-        traj.header.stamp = self.get_clock().now().to_msg()
         traj.joint_names = [self.gripper_joint_name]
 
         point = JointTrajectoryPoint()
         point.positions = [float(position)]
         point.velocities = [0.0]
-        point.time_from_start = Duration(sec=1, nanosec=0)
-
-        traj.points = [point]
-        self.gripper_traj_pub.publish(traj)
-        self.get_logger().info(
-            f'Sent gripper position: {position:.3f} '
-            f'({"close" if position > 0.02 else "open"})'
+        motion_time = max(0.1, self.gripper_motion_time_sec)
+        motion_sec = int(motion_time)
+        motion_nanosec = int((motion_time - motion_sec) * 1e9)
+        point.time_from_start = Duration(
+            sec=motion_sec,
+            nanosec=motion_nanosec,
         )
+        traj.points = [point]
+
+        goal_msg = FollowJointTrajectory.Goal()
+        goal_msg.trajectory = traj
+
+        send_goal_future = self.gripper_action_client.send_goal_async(goal_msg)
+        rclpy.spin_until_future_complete(
+            self,
+            send_goal_future,
+            timeout_sec=2.0,
+        )
+
+        goal_handle = send_goal_future.result()
+        if goal_handle is None:
+            self.get_logger().warn('Gripper send_goal timed out')
+            return False
+        if not goal_handle.accepted:
+            self.get_logger().warn('Gripper goal rejected by controller')
+            return False
+
+        result_future = goal_handle.get_result_async()
+        # Gazebo can run far below real time. Keep this longer than the
+        # trajectory's sim-time duration, and shorter than the state-machine
+        # fallback timeout so /task/gripper_done normally arrives first.
+        rclpy.spin_until_future_complete(
+            self,
+            result_future,
+            timeout_sec=self.gripper_result_timeout_sec,
+        )
+
+        result_wrapper = result_future.result()
+        if result_wrapper is None:
+            self.get_logger().warn(
+                'Gripper result timed out; canceling active gripper goal'
+            )
+            cancel_future = goal_handle.cancel_goal_async()
+            rclpy.spin_until_future_complete(
+                self,
+                cancel_future,
+                timeout_sec=2.0,
+            )
+            return False
+
+        result = result_wrapper.result
+        ok = (
+            result_wrapper.status == GoalStatus.STATUS_SUCCEEDED
+            and result.error_code == FollowJointTrajectory.Result.SUCCESSFUL
+        )
+        self.get_logger().info(
+            f'Gripper command done: position={position:.3f} '
+            f'({"close" if position > 0.02 else "open"}), '
+            f'status={result_wrapper.status}, '
+            f'error_code={result.error_code}, '
+            f'error_string="{result.error_string}"'
+        )
+        return ok
 
     # ------------------------------------------------------------------
     # Motion execution
@@ -345,7 +433,7 @@ class MoveToPregraspNode(Node):
             self.get_logger().warn('No pregrasp point available, skip.')
             return False
 
-        # PointStamped → PoseStamped（roll=180° 表示末端朝下）
+        # PointStamped → PoseStamped（补全抓取 RPY）
         pose = point_stamped_to_pose_stamped(
             point,
             roll_deg=self.grasp_roll_deg,
@@ -368,7 +456,11 @@ class MoveToPregraspNode(Node):
 
         self.get_logger().info(
             f'Executing pregrasp → position={[f"{v:.3f}" for v in position]}, '
-            f'frame={frame_id}'
+            f'frame={frame_id}, '
+            f'grasp_rpy=({self.grasp_roll_deg:.0f}°,'
+            f'{self.grasp_pitch_deg:.0f}°,'
+            f'{self.grasp_yaw_deg:.0f}°), '
+            f'quat_xyzw={[f"{v:.3f}" for v in quat_xyzw]}'
         )
 
         try:
@@ -446,23 +538,33 @@ class MoveToPregraspNode(Node):
 
     def run(self):
         """
-        事件驱动主循环（在独立线程中运行）：
-        轮询 triggered 标志，触发时执行对应运动并发布反馈。
+        事件驱动主循环：
+        空闲时由本循环 spin_once 处理订阅；执行 MoveIt 运动时，
+        pymoveit2.wait_until_executed() 自己会 spin_once 同一个 node。
+        这样同一时刻只有一个 spin owner，避免 rclpy action wait set 崩溃。
         """
         self.get_logger().info(
             f'Waiting {self.startup_wait_sec:.0f}s for MoveIt2 / controllers...'
         )
-        time.sleep(self.startup_wait_sec)
+
+        startup_until = time.monotonic() + self.startup_wait_sec
+        while rclpy.ok() and time.monotonic() < startup_until:
+            rclpy.spin_once(self, timeout_sec=0.1)
+
         self.get_logger().info('move_to_pregrasp_node ready.')
 
         while rclpy.ok():
+            rclpy.spin_once(self, timeout_sec=0.05)
+
             # ---- 检查夹爪指令 ----
             with self._lock:
                 gripper_cmd = self.gripper_command
                 self.gripper_command = None
 
             if gripper_cmd is not None:
-                self._send_gripper_position(gripper_cmd)
+                ok = self._execute_gripper_command(gripper_cmd)
+                self._pub_bool(self.gripper_success_pub, ok)
+                self._pub_bool(self.gripper_done_pub, True)
 
             # ---- 检查 pregrasp 触发 ----
             with self._lock:
@@ -486,30 +588,16 @@ class MoveToPregraspNode(Node):
                 success = self._execute_goal_pose()
                 self._publish_goal_pose_done(success)
 
-            time.sleep(0.05)
-
 
 def main(args=None):
     rclpy.init(args=args)
 
     node = MoveToPregraspNode()
 
-    executor = MultiThreadedExecutor(num_threads=4)
-    executor.add_node(node)
-
-    # 后台 spin（处理订阅回调 + MoveIt2 action/service）
-    spin_thread = threading.Thread(
-        target=executor.spin,
-        daemon=True,
-    )
-    spin_thread.start()
-
-    # 前台事件驱动主循环
     try:
         node.run()
     except KeyboardInterrupt:
         pass
     finally:
-        executor.shutdown()
         node.destroy_node()
         rclpy.shutdown()

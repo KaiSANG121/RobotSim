@@ -48,19 +48,26 @@ class TaskStateMachineNode(Node):
         self.declare_parameter("declutter_candidate_visible_timeout_sec", 1.5)
 
         self.declare_parameter("verify_pregrasp_wait_sec", 0.5)
-        self.declare_parameter("virtual_grasp_wait_sec", 0.6)
-        self.declare_parameter("virtual_release_wait_sec", 0.6)
+        # Gripper action uses sim time, while this state machine uses wall time.
+        # On slow Gazebo, 3s sim time can exceed 15s wall time, so this fallback
+        # must stay longer than the executor's gripper_result_timeout_sec.
+        self.declare_parameter("virtual_grasp_wait_sec", 35.0)
+        self.declare_parameter("virtual_release_wait_sec", 35.0)
+        self.declare_parameter("max_gripper_retries", 2)
 
         self.declare_parameter("max_declutter_per_target", 1)
         self.declare_parameter("max_place_retries", 1)
 
         # Bin B hover pose
         self.declare_parameter("place_xyz", [-0.36, -0.18, 0.28])
-        self.declare_parameter("place_rpy_deg", [180.0, 0.0, 0.0])
+        # Keep place hover orientation aligned with grasp_rpy to avoid a large
+        # wrist flip from pregrasp to Bin B.
+        self.declare_parameter("place_rpy_deg", [180.0, 90.0, 0.0])
 
         # Declutter temporary hover pose
         self.declare_parameter("declutter_temp_xyz", [-0.36, -0.18, 0.28])
-        self.declare_parameter("declutter_temp_rpy_deg", [180.0, 0.0, 0.0])
+        # Same orientation as place/grasp; declutter uses the same hover target.
+        self.declare_parameter("declutter_temp_rpy_deg", [180.0, 90.0, 0.0])
 
         # Gripper control positions: 0.0 = open, 0.05 = closed (FR-5.2)
         self.declare_parameter("gripper_close_position", 0.05)
@@ -92,6 +99,9 @@ class TaskStateMachineNode(Node):
         )
         self.virtual_release_wait_sec: float = float(
             self.get_parameter("virtual_release_wait_sec").value
+        )
+        self.max_gripper_retries: int = int(
+            self.get_parameter("max_gripper_retries").value
         )
 
         self.max_declutter_per_target: int = int(
@@ -144,6 +154,7 @@ class TaskStateMachineNode(Node):
         self.current_declutter_candidate: Optional[str] = None
 
         self.place_retry_count: int = 0
+        self.gripper_retry_count: int = 0
 
         # Latest inputs
         self.current_target_visible: bool = False
@@ -156,6 +167,10 @@ class TaskStateMachineNode(Node):
         self.goal_pose_running: bool = False
         self.goal_pose_done: bool = False
         self.goal_pose_success: bool = False
+
+        # 夹爪闭环反馈 (来自 /task/gripper_done + /task/gripper_success)
+        self.gripper_done: bool = False
+        self.gripper_success: bool = False
 
         # ==================================================
         # Subscribers
@@ -208,6 +223,18 @@ class TaskStateMachineNode(Node):
             Bool,
             "/task/goal_pose_success",
             self.goal_pose_success_callback,
+            10,
+        )
+        self.create_subscription(
+            Bool,
+            "/task/gripper_done",
+            self.gripper_done_callback,
+            10,
+        )
+        self.create_subscription(
+            Bool,
+            "/task/gripper_success",
+            self.gripper_success_callback,
             10,
         )
 
@@ -293,6 +320,12 @@ class TaskStateMachineNode(Node):
     def goal_pose_success_callback(self, msg: Bool):
         self.goal_pose_success = bool(msg.data)
 
+    def gripper_done_callback(self, msg: Bool):
+        self.gripper_done = bool(msg.data)
+
+    def gripper_success_callback(self, msg: Bool):
+        self.gripper_success = bool(msg.data)
+
     # ==================================================
     # Helpers
     # ==================================================
@@ -335,10 +368,15 @@ class TaskStateMachineNode(Node):
 
         self.publish_state()
 
-        # FR-4.1 / FR-5.2: 夹爪状态切入时立即发开合指令，等 wait_sec 后切下一态
+        # FR-4.1 / FR-5.2: 夹爪状态切入时 reset 反馈 flags + 发开合指令,
+        # 然后由 step() 等 /task/gripper_done 推进下一态。
         if new_state == "VIRTUAL_GRASP":
+            self.gripper_retry_count = 0
+            self.reset_gripper_flags()
             self.publish_gripper_command(self.gripper_close_position)
         elif new_state in ("VIRTUAL_RELEASE", "DECLUTTER_VIRTUAL_RELEASE"):
+            self.gripper_retry_count = 0
+            self.reset_gripper_flags()
             self.publish_gripper_command(self.gripper_open_position)
 
     def time_in_state(self) -> float:
@@ -376,6 +414,23 @@ class TaskStateMachineNode(Node):
             f"({'close' if position > 0.02 else 'open'})"
         )
 
+    def retry_gripper_command(self, position: float, label: str) -> bool:
+        if self.gripper_retry_count >= self.max_gripper_retries:
+            return False
+
+        self.gripper_retry_count += 1
+        self.reset_gripper_flags()
+        self.state_enter_time = time.monotonic()
+        self.publish_gripper_command(position)
+
+        text = (
+            f"Retry gripper {label} "
+            f"{self.gripper_retry_count}/{self.max_gripper_retries}"
+        )
+        self.get_logger().warn(text)
+        self.publish_status(text)
+        return True
+
     def perception_aligned_with_expected_target(self) -> bool:
         return self.current_target_name_echo == self.expected_target_name
 
@@ -388,6 +443,10 @@ class TaskStateMachineNode(Node):
         self.goal_pose_running = False
         self.goal_pose_done = False
         self.goal_pose_success = False
+
+    def reset_gripper_flags(self):
+        self.gripper_done = False
+        self.gripper_success = False
 
     def trigger_pregrasp(self):
         self.reset_pregrasp_flags()
@@ -519,8 +578,30 @@ class TaskStateMachineNode(Node):
             return
 
         if self.state == "VIRTUAL_GRASP":
-            if self.time_in_state() >= self.virtual_grasp_wait_sec:
-                self.set_state("MOVE_TO_PLACE_HOVER", "Virtual grasp done")
+            if self.gripper_done:
+                if self.gripper_success:
+                    self.set_state("MOVE_TO_PLACE_HOVER", "Gripper closed (success)")
+                else:
+                    if self.retry_gripper_command(
+                        self.gripper_close_position,
+                        "close",
+                    ):
+                        return
+                    self.set_state(
+                        "FINISHED",
+                        "Gripper close action failed after retries; stopping sequence",
+                    )
+            elif self.time_in_state() >= self.virtual_grasp_wait_sec:
+                if self.retry_gripper_command(
+                    self.gripper_close_position,
+                    "close timeout",
+                ):
+                    return
+                self.set_state(
+                    "FINISHED",
+                    f"Gripper close timeout after retries "
+                    f"({self.virtual_grasp_wait_sec}s); stopping sequence",
+                )
             return
 
         if self.state == "MOVE_TO_PLACE_HOVER":
@@ -544,8 +625,30 @@ class TaskStateMachineNode(Node):
             return
 
         if self.state == "VIRTUAL_RELEASE":
-            if self.time_in_state() >= self.virtual_release_wait_sec:
-                self.set_state("NEXT_TARGET", "Virtual release done")
+            if self.gripper_done:
+                if self.gripper_success:
+                    self.set_state("NEXT_TARGET", "Gripper opened (success)")
+                else:
+                    if self.retry_gripper_command(
+                        self.gripper_open_position,
+                        "open",
+                    ):
+                        return
+                    self.set_state(
+                        "FINISHED",
+                        "Gripper open action failed after retries; stopping sequence",
+                    )
+            elif self.time_in_state() >= self.virtual_release_wait_sec:
+                if self.retry_gripper_command(
+                    self.gripper_open_position,
+                    "open timeout",
+                ):
+                    return
+                self.set_state(
+                    "FINISHED",
+                    f"Gripper open timeout after retries "
+                    f"({self.virtual_release_wait_sec}s); stopping sequence",
+                )
             return
 
         if self.state == "NEXT_TARGET":
@@ -665,10 +768,33 @@ class TaskStateMachineNode(Node):
             return
 
         if self.state == "DECLUTTER_VIRTUAL_RELEASE":
-            if self.time_in_state() >= self.virtual_release_wait_sec:
+            if self.gripper_done:
+                if self.gripper_success:
+                    self.set_state(
+                        "RESTORE_ORIGINAL_TARGET",
+                        "Declutter gripper opened (success)",
+                    )
+                else:
+                    if self.retry_gripper_command(
+                        self.gripper_open_position,
+                        "declutter open",
+                    ):
+                        return
+                    self.set_state(
+                        "FINISHED",
+                        "Declutter gripper open action failed after retries; "
+                        "stopping sequence",
+                    )
+            elif self.time_in_state() >= self.virtual_release_wait_sec:
+                if self.retry_gripper_command(
+                    self.gripper_open_position,
+                    "declutter open timeout",
+                ):
+                    return
                 self.set_state(
-                    "RESTORE_ORIGINAL_TARGET",
-                    "Declutter virtual release done",
+                    "FINISHED",
+                    f"Declutter gripper open timeout after retries "
+                    f"({self.virtual_release_wait_sec}s); stopping sequence",
                 )
             return
 
