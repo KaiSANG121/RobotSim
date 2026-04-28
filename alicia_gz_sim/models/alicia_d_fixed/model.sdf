@@ -1,0 +1,487 @@
+<?xml version="1.0"?>
+<!--
+  Alicia-D v5.6 Gazebo SDF Model
+  转换自: Alicia_D_v5_6_gripper_100mm.urdf
+  包含: base_link → Link1~Link6 → left_gripper/right_gripper → gripper_center
+  关节: Joint1~Joint6 (revolute), Gripper (prismatic), right_finger (prismatic, mimic)
+
+  ⚠️ 插件加载策略说明（2026-04-27 重构）
+  本 model.sdf 在当前 launch 流程下**不被 bin_scene.sdf 静态 include**，
+  机器人由 sim_demo.launch.py 通过 `ros_gz_sim create -topic /robot_description`
+  从 URDF 动态 spawn。控制器与 JointState 插件由
+  `alicia_moveit_config/config/alicia_d.ros2_control.xacro` 中的 <gazebo> 块声明，
+  随 URDF 一起注入 Gazebo。所以本文件**不再声明** gz_ros2_control / JointStatePublisher
+  插件，避免双重加载与配置冲突。
+
+  本文件主要承担：
+    1. 资源解析单元 — 提供 mesh 路径锚点 (model://alicia_d_fixed/...)
+    2. 备用静态描述 — 若未来需要切回 SDF include 模式，可在此文件
+       重新加入 <plugin> 块；同时需删除 ros2_control xacro 的 <gazebo> 块。
+
+  mesh 路径使用 model://alicia_d_descriptions/... 协议，依赖
+  GZ_SIM_RESOURCE_PATH 包含 alicia_d_descriptions/share（由 setup_env.sh 设置）。
+-->
+<sdf version="1.8">
+  <model name="alicia_d_fixed">
+
+    <!-- ============================================================ -->
+    <!-- base_link                                                    -->
+    <!-- 当前架构: 由 URDF (Alicia_D_v5_6_gripper_100mm.urdf.xacro)   -->
+    <!--          内的 world→base_link fixed joint 锚定到世界          -->
+    <!-- ============================================================ -->
+    <link name="base_link">
+      <inertial>
+        <pose>0.00082623 0.00797844 0.04576751 0 0 0</pose>
+        <mass>0.73396142</mass>
+        <inertia>
+          <ixx>0.001384103</ixx><ixy>0.000056720</ixy><ixz>0.000000514</ixz>
+          <iyy>0.001736172</iyy><iyz>-0.000014865</iyz>
+          <izz>0.002746677</izz>
+        </inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/base_link.STL</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.808 0.843 0.906 1</ambient>
+          <diffuse>0.808 0.843 0.906 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/base_link.STL</uri>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- ============================================================ -->
+    <!-- Link1                                                        -->
+    <!-- ============================================================ -->
+    <link name="Link1">
+      <inertial>
+        <pose>-0.00010985 -0.00001290 0.00303813 0 0 0</pose>
+        <mass>0.19523345</mass>
+        <inertia>
+          <ixx>0.000258425</ixx><ixy>0.000000836</ixy><ixz>0.000002551</ixz>
+          <iyy>0.000149308</iyy><iyz>-0.000001111</iyz>
+          <izz>0.000339717</izz>
+        </inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link1.STL</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.796 0.824 0.937 1</ambient>
+          <diffuse>0.796 0.824 0.937 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link1.STL</uri>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="Joint1" type="revolute">
+      <pose relative_to="base_link">0 0 0.1295 0 -0.03978184 0</pose>
+      <parent>base_link</parent>
+      <child>Link1</child>
+      <axis>
+        <xyz>-0.03977135 0 0.99920881</xyz>
+        <limit>
+          <lower>-2.749</lower>
+          <upper>2.749</upper>
+          <effort>5</effort>
+          <velocity>12</velocity>
+        </limit>
+        <dynamics>
+          <damping>0.5</damping>
+          <friction>0.1</friction>
+        </dynamics>
+      </axis>
+    </joint>
+
+    <!-- ============================================================ -->
+    <!-- Link2                                                        -->
+    <!-- ============================================================ -->
+    <link name="Link2">
+      <inertial>
+        <pose>0.15058870 0.00100783 0.00056760 0 0 0</pose>
+        <mass>0.20703369</mass>
+        <inertia>
+          <ixx>0.000128136</ixx><ixy>0.000000119</ixy><ixz>0.000001667</ixz>
+          <iyy>0.000205708</iyy><iyz>-0.000000350</iyz>
+          <izz>0.000122721</izz>
+        </inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link2.STL</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.808 0.843 0.906 1</ambient>
+          <diffuse>0.808 0.843 0.906 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link2.STL</uri>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="Joint2" type="revolute">
+      <pose relative_to="Link1">0.00170500 0 0.04283608 1.5707963 -1.5707963 0</pose>
+      <parent>Link1</parent>
+      <child>Link2</child>
+      <axis>
+        <xyz>0 0 -1</xyz>
+        <limit>
+          <lower>-1.57</lower>
+          <upper>1.57</upper>
+          <effort>5</effort>
+          <velocity>12</velocity>
+        </limit>
+        <dynamics><damping>0.5</damping><friction>0.1</friction></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ============================================================ -->
+    <!-- Link3                                                        -->
+    <!-- ============================================================ -->
+    <link name="Link3">
+      <inertial>
+        <pose>-0.00248144 -0.05578632 -0.00026972 0 0 0</pose>
+        <mass>0.08455756</mass>
+        <inertia>
+          <ixx>0.0000761918</ixx><ixy>-0.00000226499</ixy><ixz>-0.000000382300</ixz>
+          <iyy>0.0000287941</iyy><iyz>-0.00000538445</iyz>
+          <izz>0.0000804370</izz>
+        </inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link3.STL</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.792 0.820 0.933 1</ambient>
+          <diffuse>0.792 0.820 0.933 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link3.STL</uri>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="Joint3" type="revolute">
+      <pose relative_to="Link2">0.22367130 0.02269161 -0.00005000 0 0 -2.35619449</pose>
+      <parent>Link2</parent>
+      <child>Link3</child>
+      <axis>
+        <xyz>0 0 -1</xyz>
+        <limit>
+          <lower>-0.78</lower>
+          <upper>3.14159</upper>
+          <effort>5</effort>
+          <velocity>12</velocity>
+        </limit>
+        <dynamics><damping>0.5</damping><friction>0.1</friction></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ============================================================ -->
+    <!-- Link4                                                        -->
+    <!-- ============================================================ -->
+    <link name="Link4">
+      <inertial>
+        <pose>0.00029837 -0.00060137 0.06597404 0 0 0</pose>
+        <mass>0.06536959</mass>
+        <inertia>
+          <ixx>0.0000703004</ixx><ixy>-0.00000000968</ixy><ixz>-0.000000750131</ixz>
+          <iyy>0.0000687470</iyy><iyz>0.0000000445271</iyz>
+          <izz>0.0000168226</izz>
+        </inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link4.STL</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.792 0.820 0.933 1</ambient>
+          <diffuse>0.792 0.820 0.933 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link4.STL</uri>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="Joint4" type="revolute">
+      <pose relative_to="Link3">0.00211000 -0.09900000 -0.00020000 1.5707963 0 0</pose>
+      <parent>Link3</parent>
+      <child>Link4</child>
+      <axis>
+        <xyz>0 0 -1</xyz>
+        <limit>
+          <lower>-2.7925</lower>
+          <upper>2.7925</upper>
+          <effort>5</effort>
+          <velocity>12</velocity>
+        </limit>
+        <dynamics><damping>0.5</damping><friction>0.1</friction></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ============================================================ -->
+    <!-- Link5                                                        -->
+    <!-- ============================================================ -->
+    <link name="Link5">
+      <inertial>
+        <pose>-0.01136842 0.03086875 -0.00087045 0 0 0</pose>
+        <mass>0.05076390</mass>
+        <inertia>
+          <ixx>0.0000187701</ixx><ixy>0.00000201099</ixy><ixz>-0.0000000515226</ixz>
+          <iyy>0.0000251021</iyy><iyz>-0.0000000422413</iyz>
+          <izz>0.0000172572</izz>
+        </inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link5.STL</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.792 0.820 0.933 1</ambient>
+          <diffuse>0.792 0.820 0.933 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link5.STL</uri>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="Joint5" type="revolute">
+      <pose relative_to="Link4">0 -0.00050000 0.12235000 1.5707963 0 0</pose>
+      <parent>Link4</parent>
+      <child>Link5</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-1.57</lower>
+          <upper>1.57</upper>
+          <effort>5</effort>
+          <velocity>12</velocity>
+        </limit>
+        <dynamics><damping>0.5</damping><friction>0.1</friction></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ============================================================ -->
+    <!-- Link6                                                        -->
+    <!-- ============================================================ -->
+    <link name="Link6">
+      <inertial>
+        <pose>-0.02876443 -0.00016362 0.03414807 0 0 0</pose>
+        <mass>0.12343629</mass>
+        <inertia>
+          <ixx>0.0000816840</ixx><ixy>0.0000000106380</ixy><ixz>-0.00000360107</ixz>
+          <iyy>0.0000341799</iyy><iyz>0.0000000208540</iyz>
+          <izz>0.0000879930</izz>
+        </inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link6.STL</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.592 0.667 0.682 1</ambient>
+          <diffuse>0.592 0.667 0.682 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link6.STL</uri>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="Joint6" type="revolute">
+      <pose relative_to="Link5">-0.00385000 0.05750000 -0.00100000 -1.5707963 0 0</pose>
+      <parent>Link5</parent>
+      <child>Link6</child>
+      <axis>
+        <xyz>0 0 -1</xyz>
+        <limit>
+          <lower>-3.14</lower>
+          <upper>3.14</upper>
+          <effort>5</effort>
+          <velocity>12</velocity>
+        </limit>
+        <dynamics><damping>0.3</damping><friction>0.05</friction></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ============================================================ -->
+    <!-- left_gripper (主动爪，受 Gripper joint 控制)                  -->
+    <!-- ============================================================ -->
+    <link name="left_gripper">
+      <inertial>
+        <pose>-0.00000003 -0.04340876 0.01065967 0 0 0</pose>
+        <mass>0.02564611</mass>
+        <inertia>
+          <ixx>0.00000646830</ixx><ixy>0.0000000000240351</ixy><ixz>0.00000000000469832</ixz>
+          <iyy>0.00000513429</iyy><iyz>0.00000126432</iyz>
+          <izz>0.00000803606</izz>
+        </inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/left_gripper.STL</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.592 0.667 0.682 1</ambient>
+          <diffuse>0.592 0.667 0.682 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/left_gripper.STL</uri>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- Gripper: prismatic, 0=open, 0.05=closed -->
+    <joint name="Gripper" type="prismatic">
+      <pose relative_to="Link6">-0.00020000 -0.05049785 0.13097966 1.5707963 0 0</pose>
+      <parent>Link6</parent>
+      <child>left_gripper</child>
+      <axis>
+        <xyz>0 0 -1</xyz>
+        <limit>
+          <lower>0</lower>
+          <upper>0.05</upper>
+          <effort>5</effort>
+          <velocity>12</velocity>
+        </limit>
+        <dynamics><damping>0.1</damping><friction>0.05</friction></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ============================================================ -->
+    <!-- right_gripper (随动爪，mimic Gripper，方向相反)               -->
+    <!-- ============================================================ -->
+    <link name="right_gripper">
+      <inertial>
+        <pose>0.00000003 0.04340876 0.01065967 0 0 0</pose>
+        <mass>0.02564611</mass>
+        <inertia>
+          <ixx>0.00000646830</ixx><ixy>0.0000000000238640</ixy><ixz>-0.00000000000457155</ixz>
+          <iyy>0.00000513429</iyy><iyz>-0.00000126432</iyz>
+          <izz>0.00000803606</izz>
+        </inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/right_gripper.STL</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.592 0.667 0.682 1</ambient>
+          <diffuse>0.592 0.667 0.682 1</diffuse>
+        </material>
+      </visual>
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/right_gripper.STL</uri>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- right_finger: mimic Gripper (multiplier=-1) -->
+    <joint name="right_finger" type="prismatic">
+      <pose relative_to="Link6">-0.0002 0.050502 0.13098 -1.5708 0 0</pose>
+      <parent>Link6</parent>
+      <child>right_gripper</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-0.05</lower>
+          <upper>0</upper>
+          <effort>5</effort>
+          <velocity>12</velocity>
+        </limit>
+        <dynamics><damping>0.1</damping><friction>0.05</friction></dynamics>
+        <!-- Mimic Gripper joint: right_finger = -1.0 * Gripper -->
+        <mimic joint="Gripper">
+          <multiplier>-1.0</multiplier>
+          <offset>0</offset>
+        </mimic>
+      </axis>
+    </joint>
+
+    <!-- ============================================================ -->
+    <!-- gripper_center (末端执行器虚拟链接，MoveIt 规划目标点)        -->
+    <!-- ============================================================ -->
+    <link name="gripper_center">
+      <visual name="visual">
+        <geometry>
+          <sphere><radius>0.005</radius></sphere>
+        </geometry>
+        <material>
+          <ambient>0 1 0 1</ambient>
+          <diffuse>0 1 0 1</diffuse>
+        </material>
+      </visual>
+      <!-- gripper_center 无碰撞、无质量（虚拟参考点） -->
+    </link>
+
+    <joint name="finger" type="fixed">
+      <pose relative_to="Link6">-0.0002 0 0.13048 0 0 0</pose>
+      <parent>Link6</parent>
+      <child>gripper_center</child>
+    </joint>
+
+  </model>
+</sdf>

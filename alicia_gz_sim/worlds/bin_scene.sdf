@@ -1,0 +1,396 @@
+<?xml version="1.0" ?>
+<sdf version="1.8">
+  <world name="default">
+
+    <!-- ========================= -->
+    <!-- World plugins             -->
+    <!-- ========================= -->
+
+    <plugin
+      filename="ignition-gazebo-physics-system"
+      name="ignition::gazebo::systems::Physics">
+    </plugin>
+
+    <plugin
+      filename="ignition-gazebo-scene-broadcaster-system"
+      name="ignition::gazebo::systems::SceneBroadcaster">
+    </plugin>
+
+    <plugin
+      filename="ignition-gazebo-user-commands-system"
+      name="ignition::gazebo::systems::UserCommands">
+    </plugin>
+
+    <plugin
+      filename="libignition-gazebo-sensors-system.so"
+      name="ignition::gazebo::systems::Sensors">
+      <!--
+        WSL2 集显软件渲染兼容性: ogre2 在 GL3Plus 后端缺少 mipmap copyTo 实现，
+        会导致 RenderUtil::Init 时抛 UnimplementedException 崩溃。
+        改用 ogre1 (libignition-rendering-ogre)，需 apt 安装:
+          sudo apt install libignition-rendering6-ogre
+        副作用: ogre1 不支持 rgbd_camera 统一传感器类型，
+        故下方相机已拆为 camera + depth_camera 两个独立传感器。
+      -->
+      <render_engine>ogre</render_engine>
+    </plugin>
+
+    <gravity>0 0 -9.8</gravity>
+
+    <!-- ========================= -->
+    <!-- 物理参数（WSL2 弱 CPU 调优）-->
+    <!--                                                                  -->
+    <!-- 默认 Gazebo 用 1ms (1000 Hz) sim step + 自动追赶 wall time, WSL2 -->
+    <!-- 集显 + 软件渲染下 CPU 跟不上, 会出现 sim_time 抖动/回退,         -->
+    <!-- 触发下游 tf2 buffer 反复 "Detected jump back in time" + RViz     -->
+    <!-- 重置, 表现为机械臂在 RViz 中一闪一闪。                          -->
+    <!--                                                                  -->
+    <!-- max_step_size=0.005 → 200 Hz sim step (默认 1000 Hz 的 1/5),     -->
+    <!-- real_time_update_rate=200 → Gazebo 不会硬追赶 wall time,         -->
+    <!-- 跑不动时 sim_time 自然变慢, 但保持单调递增, tf 就不再回跳。     -->
+    <!-- ========================= -->
+    <physics name="wsl_friendly" default="true" type="ode">
+      <max_step_size>0.005</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>200</real_time_update_rate>
+    </physics>
+
+    <!-- ========================= -->
+    <!-- 光源                      -->
+    <!-- ========================= -->
+
+    <light name="sun" type="directional">
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -1</direction>
+      <cast_shadows>true</cast_shadows>
+    </light>
+
+    <!-- ========================= -->
+    <!-- 地面                      -->
+    <!-- ========================= -->
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>20 20</size>
+            </plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>20 20</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.85 0.85 0.85 1</ambient>
+            <diffuse>0.85 0.85 0.85 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ========================= -->
+    <!-- Alicia-D 纯版（含原始夹爪）-->
+    <!-- 通过 ros_gz_sim 的 create 节点从 /robot_description 动态加载 -->
+    <!-- 不再在此 SDF 中静态 include，防止模型冲突与物理爆炸 -->
+    <!-- ========================= -->
+
+    <!-- ========================= -->
+    <!-- Bin A: 取料仓（机器人前方左侧）-->
+    <!-- ========================= -->
+
+    <model name="bin_a_floor">
+      <static>true</static>
+      <pose>-0.36 0.18 0.005 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.30 0.22 0.01</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.30 0.22 0.01</size></box></geometry>
+          <material>
+            <ambient>0.7 0.85 1.0 1</ambient>
+            <diffuse>0.7 0.85 1.0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bin_a_wall_front">
+      <static>true</static>
+      <pose>-0.36 0.285 0.06 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <model name="bin_a_wall_back">
+      <static>true</static>
+      <pose>-0.36 0.075 0.06 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <model name="bin_a_wall_left">
+      <static>true</static>
+      <pose>-0.215 0.18 0.06 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <model name="bin_a_wall_right">
+      <static>true</static>
+      <pose>-0.505 0.18 0.06 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <!-- ========================= -->
+    <!-- Bin B: 放料仓（机器人前方右侧）-->
+    <!-- ========================= -->
+
+    <model name="bin_b_floor">
+      <static>true</static>
+      <pose>-0.36 -0.18 0.005 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.30 0.22 0.01</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.30 0.22 0.01</size></box></geometry>
+          <material>
+            <ambient>0.85 1.0 0.75 1</ambient>
+            <diffuse>0.85 1.0 0.75 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="bin_b_wall_front">
+      <static>true</static>
+      <pose>-0.36 -0.075 0.06 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <model name="bin_b_wall_back">
+      <static>true</static>
+      <pose>-0.36 -0.285 0.06 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <model name="bin_b_wall_left">
+      <static>true</static>
+      <pose>-0.215 -0.18 0.06 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <model name="bin_b_wall_right">
+      <static>true</static>
+      <pose>-0.505 -0.18 0.06 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <!-- ========================= -->
+    <!-- Bin A 内 3 个测试物体      -->
+    <!-- 全部动态 (FR-1.3)          -->
+    <!-- ========================= -->
+
+    <!-- 黄色方块 (yellow_box) -->
+    <model name="test_box">
+      <static>false</static>
+      <pose>-0.40 0.17 0.055 0 0 0.4</pose>
+      <link name="link">
+        <inertial>
+          <mass>0.15</mass>
+          <inertia>
+            <ixx>0.000113</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>0.000238</iyy><iyz>0</iyz>
+            <izz>0.000238</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry><box><size>0.06 0.10 0.07</size></box></geometry>
+          <surface>
+            <friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.06 0.10 0.07</size></box></geometry>
+          <material>
+            <ambient>1.0 0.75 0.1 1</ambient>
+            <diffuse>1.0 0.75 0.1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 红色圆柱 (red_cylinder) -->
+    <model name="test_can">
+      <static>false</static>
+      <pose>-0.35 0.20 0.065 0 0 0</pose>
+      <link name="link">
+        <inertial>
+          <mass>0.10</mass>
+          <inertia>
+            <ixx>0.000110</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>0.000110</iyy><iyz>0</iyz>
+            <izz>0.0000613</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry>
+            <cylinder>
+              <radius>0.035</radius>
+              <length>0.11</length>
+            </cylinder>
+          </geometry>
+          <surface>
+            <friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.035</radius>
+              <length>0.11</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.8 0.1 0.1 1</ambient>
+            <diffuse>0.8 0.1 0.1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 棕色球体 (brown_sphere) -->
+    <model name="test_potato_proxy">
+      <static>false</static>
+      <pose>-0.31 0.15 0.05 0 0 0</pose>
+      <link name="link">
+        <inertial>
+          <mass>0.08</mass>
+          <inertia>
+            <ixx>0.0000512</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>0.0000512</iyy><iyz>0</iyz>
+            <izz>0.0000512</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry><sphere><radius>0.04</radius></sphere></geometry>
+          <surface>
+            <friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry><sphere><radius>0.04</radius></sphere></geometry>
+          <material>
+            <ambient>0.55 0.30 0.10 1</ambient>
+            <diffuse>0.55 0.30 0.10 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ========================= -->
+    <!-- 俯视 RGB-D 相机（静态）   -->
+    <!-- 位置: Bin A 正上方         -->
+    <!-- ========================= -->
+
+    <model name="overhead_rgbd_camera">
+      <static>true</static>
+      <!-- pose: x=BinA_x, y=BinA_y, z=0.85m 高, 俯视朝下 (pitch=90°) -->
+      <pose>-0.36 0.18 0.85 0 1.5708 0</pose>
+
+      <link name="camera_link">
+        <visual name="camera_body_visual">
+          <geometry>
+            <box><size>0.05 0.05 0.03</size></box>
+          </geometry>
+          <material>
+            <ambient>0.15 0.15 0.15 1</ambient>
+            <diffuse>0.15 0.15 0.15 1</diffuse>
+          </material>
+        </visual>
+
+        <!--
+          RGB + Depth 拆分（ogre1 兼容方案）
+          - rgb_camera: 发布 /rgbd_camera/image
+          - depth_camera: 发布 /rgbd_camera/depth_image
+          - camera/depth_camera: 发布 /rgbd_camera/camera_info
+          下游 color_perception_node 订阅 /rgbd_camera/camera_info。
+        -->
+
+        <sensor name="rgb_camera" type="camera">
+          <always_on>true</always_on>
+          <update_rate>5</update_rate>
+          <visualize>true</visualize>
+          <topic>rgbd_camera/image</topic>
+          <frame_id>rgbd_camera_frame</frame_id>
+
+          <camera>
+            <horizontal_fov>1.047</horizontal_fov>
+            <image>
+              <width>320</width>
+              <height>240</height>
+              <format>R8G8B8</format>
+            </image>
+            <clip>
+              <near>0.05</near>
+              <far>2.0</far>
+            </clip>
+          </camera>
+        </sensor>
+
+        <sensor name="depth_camera" type="depth_camera">
+          <always_on>true</always_on>
+          <update_rate>5</update_rate>
+          <visualize>false</visualize>
+          <topic>rgbd_camera/depth_image</topic>
+          <frame_id>rgbd_camera_frame</frame_id>
+
+          <camera>
+            <horizontal_fov>1.047</horizontal_fov>
+            <image>
+              <width>320</width>
+              <height>240</height>
+              <format>R_FLOAT32</format>
+            </image>
+            <clip>
+              <near>0.05</near>
+              <far>2.0</far>
+            </clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+
+  </world>
+</sdf>

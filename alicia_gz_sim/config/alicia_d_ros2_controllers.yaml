@@ -1,0 +1,79 @@
+# Gazebo (Ignition) ROS2 Controllers Configuration
+# For: alicia_d_fixed model (pure Alicia-D 6-DOF + original 100mm gripper)
+# This config is loaded by gz_ros2_control plugin in model.sdf
+
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    Alicia_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    Gripper_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+# ---------------------------------------------------------------
+# Alicia_controller: 6-DOF arm (Joint1~Joint6)
+# ---------------------------------------------------------------
+Alicia_controller:
+  ros__parameters:
+    joints:
+      - Joint1
+      - Joint2
+      - Joint3
+      - Joint4
+      - Joint5
+      - Joint6
+
+    command_interfaces:
+      - position
+
+    state_interfaces:
+      - position
+      - velocity
+
+    state_publish_rate: 50.0
+    action_monitor_rate: 20.0
+
+    allow_partial_joints_goal: false
+    open_loop_control: true
+
+    constraints:
+      goal_time: 5.0
+      stopped_velocity_tolerance: 0.20
+      Joint1: {trajectory: 2.50, goal: 0.50}
+      Joint2: {trajectory: 2.50, goal: 0.50}
+      Joint3: {trajectory: 2.50, goal: 0.50}
+      Joint4: {trajectory: 2.50, goal: 0.50}
+      Joint5: {trajectory: 2.50, goal: 0.50}
+      Joint6: {trajectory: 2.50, goal: 0.50}
+
+# ---------------------------------------------------------------
+# Gripper_controller: prismatic gripper (Gripper joint)
+# 0.0 = open, 0.05 = closed
+# ---------------------------------------------------------------
+Gripper_controller:
+  ros__parameters:
+    joints:
+      - Gripper
+
+    command_interfaces:
+      - position
+
+    state_interfaces:
+      - position
+      - velocity
+
+    state_publish_rate: 50.0
+    action_monitor_rate: 20.0
+
+    allow_partial_joints_goal: false
+    open_loop_control: true
+
+    constraints:
+      goal_time: 5.0
+      stopped_velocity_tolerance: 0.05
+      Gripper: {trajectory: 0.10, goal: 0.01}

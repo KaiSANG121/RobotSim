@@ -1,0 +1,26 @@
+# ROS/colcon generated output
+build/
+install/
+log/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Runtime and local environment files
+.ros/
+.vscode/
+.idea/
+
+# OS/editor metadata
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# Codex local marker
+.codex
+
+# Large runtime captures
+rosbag2_*/
+*.bag

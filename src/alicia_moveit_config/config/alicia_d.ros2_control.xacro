@@ -1,0 +1,91 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+    <!--
+        gz_ros2_control hardware interface for Alicia-D 6-DOF + original gripper.
+        Replaces the old fake_components/GenericSystem and real hardware xacro.
+        Plugin: gz_ros2_control/GazeboSimSystem
+        Joints: Joint1~Joint6 (revolute) + Gripper (prismatic)
+    -->
+    <xacro:macro name="alicia_d_ros2_control" params="name initial_positions_file">
+        <xacro:property name="initial_positions"
+            value="${xacro.load_yaml(initial_positions_file)['initial_positions']}"/>
+
+        <ros2_control name="${name}" type="system">
+            <hardware>
+                <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+            </hardware>
+
+            <!-- Joint1 — Base rotation -->
+            <joint name="Joint1">
+                <command_interface name="position"/>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['Joint1']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <!-- Joint2 — Shoulder -->
+            <joint name="Joint2">
+                <command_interface name="position"/>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['Joint2']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <!-- Joint3 — Elbow -->
+            <joint name="Joint3">
+                <command_interface name="position"/>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['Joint3']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <!-- Joint4 — Wrist 1 -->
+            <joint name="Joint4">
+                <command_interface name="position"/>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['Joint4']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <!-- Joint5 — Wrist 2 -->
+            <joint name="Joint5">
+                <command_interface name="position"/>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['Joint5']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <!-- Joint6 — Wrist 3 / End Effector rotation -->
+            <joint name="Joint6">
+                <command_interface name="position"/>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['Joint6']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <!-- Gripper — Prismatic (parallel jaw, 0=open, 0.05=closed) -->
+            <joint name="Gripper">
+                <command_interface name="position"/>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['Gripper']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+        </ros2_control>
+
+        <gazebo>
+            <plugin filename="ign_ros2_control-system" name="ign_ros2_control::IgnitionROS2ControlPlugin">
+                <parameters>$(env HOME)/RobotSim/alicia_gz_sim/config/alicia_d_ros2_controllers.yaml</parameters>
+                <ros>
+                    <remapping>~/robot_description:=/robot_description</remapping>
+                </ros>
+            </plugin>
+        </gazebo>
+    </xacro:macro>
+</robot>
