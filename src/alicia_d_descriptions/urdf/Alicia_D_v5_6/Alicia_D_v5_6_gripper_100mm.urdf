@@ -378,15 +378,6 @@
           rgba="0.592156862745098 0.666666666666667 0.682352941176471 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/Link6.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint
     name="Joint6"
@@ -436,15 +427,6 @@
           rgba="0.592156862745098 0.666666666666667 0.682352941176471 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/left_gripper.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint
     name="Gripper"
@@ -461,7 +443,7 @@
     <limit
       lower="0"
       upper="0.05"
-      effort="5"
+      effort="100"
       velocity="12" />
   </joint>
   <link
@@ -494,15 +476,6 @@
           rgba="0.592156862745098 0.666666666666667 0.682352941176471 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://alicia_d_descriptions/meshes/Alicia_D_v5_6/gripper_100mm/right_gripper.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint
     name="right_finger"
@@ -519,10 +492,9 @@
     <limit
       lower="-0.05"
       upper="0"
-      effort="5"
+      effort="100"
       velocity="12" />
     <mimic joint="Gripper" multiplier="-1" offset="0"/>
-
   </joint>
   <link
     name="gripper_center">
