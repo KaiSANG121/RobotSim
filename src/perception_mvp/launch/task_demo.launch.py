@@ -202,11 +202,11 @@ def launch_setup(context, *args, **kwargs):
         if strict_top_down_physical:
             grasp_rpy_deg = [180.0, 0.0, 90.0]
         else:
-            grasp_rpy_deg = [180.0, 90.0, 0.0]
+            grasp_rpy_deg = [180.0, 40.0, 0.0]
     else:
         grasp_rpy_deg = parse_float_list(grasp_rpy_text, [180.0, 90.0, 0.0])
         if len(grasp_rpy_deg) != 3:
-            grasp_rpy_deg = [180.0, 90.0, 0.0]
+            grasp_rpy_deg = [180.0, 40.0, 0.0]
 
     if grasp_reference_offset_text.strip().lower() == "auto":
         grasp_reference_offset_xyz = [0.0, 0.0, 0.0]

@@ -64,7 +64,7 @@ def rotate_vector_by_rpy_deg(
 def point_stamped_to_pose_stamped(
     point: PointStamped,
     roll_deg: float = 180.0,
-    pitch_deg: float = 90.0,
+    pitch_deg: float = 40.0,
     yaw_deg: float = 0.0,
     reference_offset_xyz: Optional[List[float]] = None,
 ) -> PoseStamped:

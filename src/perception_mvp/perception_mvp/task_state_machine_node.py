@@ -80,7 +80,7 @@ class TaskStateMachineNode(Node):
         self.declare_parameter("grasp_height_offsets", [0.035])
         self.declare_parameter("grasp_position_offset_xyz", [0.0, 0.0, 0.0])
         self.declare_parameter("grasp_reference_offset_xyz", [0.0, 0.0, 0.0])
-        self.declare_parameter("grasp_rpy_deg", [180.0, 90.0, 0.0])
+        self.declare_parameter("grasp_rpy_deg", [180.0, 40.0, 0.0])
         # Gripper action uses sim time, while this state machine uses wall time.
         # On slow Gazebo, 3s sim time can exceed 15s wall time, so this fallback
         # must stay longer than the executor's gripper_result_timeout_sec.
@@ -98,12 +98,12 @@ class TaskStateMachineNode(Node):
         self.declare_parameter("place_slots_xyz", [-0.36, -0.145, 0.28])
         # Keep place hover orientation aligned with grasp_rpy to avoid a large
         # wrist flip from pregrasp to Bin B.
-        self.declare_parameter("place_rpy_deg", [180.0, 90.0, 0.0])
+        self.declare_parameter("place_rpy_deg", [180.0, 40.0, 0.0])
 
         # Declutter temporary hover pose
         self.declare_parameter("declutter_temp_xyz", [-0.36, -0.145, 0.28])
         # Same orientation as place/grasp; declutter uses the same hover target.
-        self.declare_parameter("declutter_temp_rpy_deg", [180.0, 90.0, 0.0])
+        self.declare_parameter("declutter_temp_rpy_deg", [180.0, 40.0, 0.0])
 
         # Lift after closing before moving laterally between bins. This keeps
         # the virtual attached object above the bin walls during transport.
