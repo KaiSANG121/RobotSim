@@ -26,6 +26,7 @@ from launch.actions import (
     IncludeLaunchDescription,
     OpaqueFunction,
     RegisterEventHandler,
+    SetEnvironmentVariable,
     TimerAction,
 )
 from launch.event_handlers import OnProcessExit
@@ -61,6 +62,17 @@ def world_file_for_render_engine(source_world_file, render_engine):
 
 
 def launch_setup(context, *args, **kwargs):
+    # ------------------------------------------------------------------ #
+    # Set Gazebo resource path so it can find mesh files from URDF
+    # package:// URIs are mapped to model:// and looked up here
+    # ------------------------------------------------------------------ #
+    desc_share = get_package_share_directory('alicia_d_descriptions')
+    desc_share_parent = os.path.dirname(desc_share)  # .../share
+    existing = os.environ.get('IGN_GAZEBO_RESOURCE_PATH', '')
+    new_path = desc_share_parent + (':' + existing if existing else '')
+    os.environ['IGN_GAZEBO_RESOURCE_PATH'] = new_path
+    os.environ['GZ_SIM_RESOURCE_PATH'] = new_path
+
     use_rviz = LaunchConfiguration('use_rviz').perform(context).lower() == 'true'
     headless = LaunchConfiguration('headless').perform(context).lower() == 'true'
     render_engine = LaunchConfiguration('render_engine').perform(context).lower()

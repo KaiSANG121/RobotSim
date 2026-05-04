@@ -554,7 +554,7 @@
     name="finger"
     type="fixed">
     <origin
-      xyz="-0.0002 0 0.13048"
+      xyz="-0.0002 0 0.10"
       rpy="0 0 0" />
     <parent
       link="Link6" />
