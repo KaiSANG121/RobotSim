@@ -175,7 +175,7 @@
     <!-- 同时保持距离基座 ≤0.40m, 不超出机械臂可达范围。 -->
     <model name="test_box">
       <static>false</static>
-      <pose>-0.36 0.10 0.035 0 0 1.5708</pose>
+      <pose>-0.36 0.10 0.05 1.5708 0 1.5708</pose>
       <link name="link">
         <inertial>
           <mass>0.15</mass>
