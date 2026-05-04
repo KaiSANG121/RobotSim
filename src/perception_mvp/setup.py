@@ -1,3 +1,5 @@
+from glob import glob
+
 from setuptools import setup
 
 package_name = 'perception_mvp'
@@ -10,6 +12,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -23,6 +26,7 @@ setup(
             'color_perception_node = perception_mvp.color_perception_node:main',
             'move_to_pregrasp_node = perception_mvp.move_to_pregrasp_node:main',
             'task_state_machine_node = perception_mvp.task_state_machine_node:main',
+            'virtual_grasp_node = perception_mvp.virtual_grasp_node:main',
         ],
     },
 )

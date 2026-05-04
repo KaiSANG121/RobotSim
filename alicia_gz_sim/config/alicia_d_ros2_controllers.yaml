@@ -42,7 +42,7 @@ Alicia_controller:
     open_loop_control: true
 
     constraints:
-      goal_time: 5.0
+      goal_time: 20.0
       stopped_velocity_tolerance: 0.20
       Joint1: {trajectory: 2.50, goal: 0.50}
       Joint2: {trajectory: 2.50, goal: 0.50}
@@ -52,13 +52,15 @@ Alicia_controller:
       Joint6: {trajectory: 2.50, goal: 0.50}
 
 # ---------------------------------------------------------------
-# Gripper_controller: prismatic gripper (Gripper joint)
-# 0.0 = open, 0.05 = closed
+# Gripper_controller: prismatic parallel gripper
+# Gripper: 0.0=open, 0.05=closed
+# right_finger: 0.0=open, -0.05=closed
 # ---------------------------------------------------------------
 Gripper_controller:
   ros__parameters:
     joints:
       - Gripper
+      - right_finger
 
     command_interfaces:
       - effort
@@ -75,13 +77,20 @@ Gripper_controller:
 
     gains:
       Gripper:
-        p: 200.0
-        i: 0.5
-        d: 5.0
-        i_clamp: 10.0
+        p: 60.0
+        i: 0.0
+        d: 4.0
+        i_clamp: 0.0
+        ff_velocity_scale: 0.0
+      right_finger:
+        p: 60.0
+        i: 0.0
+        d: 4.0
+        i_clamp: 0.0
         ff_velocity_scale: 0.0
 
     constraints:
-      goal_time: 5.0
-      stopped_velocity_tolerance: 0.05
-      Gripper: {trajectory: 0.10, goal: 0.01}
+      goal_time: 10.0
+      stopped_velocity_tolerance: 0.10
+      Gripper: {trajectory: 0.15, goal: 0.04}
+      right_finger: {trajectory: 0.15, goal: 0.04}

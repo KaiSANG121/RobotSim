@@ -1,56 +1,38 @@
-# RobotSim: Alicia-D 智能抓取仿真系统
+# RobotSim: Alicia-D 真实物理抓取仿真
 
-本仓库是一个基于 **ROS 2 Humble + Gazebo Fortress + MoveIt2** 的 Alicia-D 六自由度机械臂抓取仿真项目。系统在 Gazebo 中加载 Alicia-D 机械臂、100mm 平行夹爪、RGB-D 相机和多个测试物体，通过 ROS 2 节点完成颜色感知、任务状态机决策、MoveIt2 轨迹规划与执行，实现多个物体的自动抓取与放置闭环。
+RobotSim 是一个基于 ROS 2 Humble、Gazebo Fortress 和 MoveIt2 的 Alicia-D 六自由度机械臂抓取仿真项目。当前主线目标是验证三物体顺序抓取闭环：
+
+```text
+red_cylinder -> yellow_box -> brown_cube
+```
+
+系统使用顶视 RGB-D 相机做颜色感知，用 MoveIt2 规划 Alicia-D 机械臂运动，用 Gazebo 的 collision、contact 和 friction 模拟真实物理夹取。旧的虚拟附着模式仍保留，可作为调试 fallback。
 
 ![RobotSim 仿真运行截图](media/simulation.png)
 
-## 1. 项目架构
+## 当前场景
+
+取料区已经移除 Bin A，物体直接放在地面上，以降低下爪碰撞难度。放置区 Bin B 保留，但墙高降为原先一半。
+
+三个物体的 SDF 模型和默认初始位姿如下：
+
+| Target | Gazebo model | Geometry | Pose |
+| --- | --- | --- | --- |
+| `red_cylinder` | `test_can` | radius `0.035`, height `0.11` | `(-0.30, 0.255, 0.055)` |
+| `yellow_box` | `test_box` | box `0.06 x 0.10 x 0.07` | `(-0.36, 0.10, 0.035)`, yaw `1.5708` |
+| `brown_cube` | `test_brown_cube` | box `0.065 x 0.065 x 0.065` | `(-0.24, 0.10, 0.0325)` |
+
+三件物体两两边到边间距 ≥3.7cm，避开了下爪时夹爪 pad 与邻居的横向碰撞。所有物体的中心距离基座原点 ≤0.40m，落在机械臂可达半径内。
+
+Bin B 的默认多 slot 放置点：
 
 ```text
-Gazebo Fortress / Ignition
-  ├── Alicia-D 6-DOF robot
-  ├── 100mm parallel gripper
-  ├── RGB-D camera
-  └── test objects
-
-ROS 2 Humble
-  ├── robot_state_publisher
-  ├── gz_ros2_control
-  ├── MoveIt2 move_group
-  ├── RViz2
-  └── perception_mvp
-      ├── color_perception_node        # 颜色感知
-      ├── move_to_pregrasp_node        # MoveIt2 执行节点
-      └── task_state_machine_node      # 抓取任务状态机
+red_cylinder: (-0.36, -0.145, 0.28)
+yellow_box:   (-0.31, -0.145, 0.28)
+brown_cube:   (-0.26, -0.145, 0.28)
 ```
 
-## 2. 目录结构
-
-```text
-RobotSim/
-├── README.md
-├── setup_env.sh
-├── cleanup.sh
-├── alicia_gz_sim/
-│   ├── config/
-│   │   └── alicia_d_ros2_controllers.yaml
-│   ├── models/
-│   └── worlds/
-└── src/
-    ├── alicia_d_descriptions/
-    │   ├── meshes/
-    │   └── urdf/
-    ├── alicia_moveit_config/
-    │   ├── config/
-    │   └── launch/
-    └── perception_mvp/
-        └── perception_mvp/
-            ├── color_perception_node.py
-            ├── move_to_pregrasp_node.py
-            └── task_state_machine_node.py
-```
-
-## 3. 环境要求
+## 环境
 
 推荐环境：
 
@@ -60,11 +42,10 @@ RobotSim/
 - MoveIt2
 - Python 3.10
 
-常用依赖安装：
+常用依赖：
 
 ```bash
 sudo apt update
-
 sudo apt install -y \
   git \
   python3-colcon-common-extensions \
@@ -84,21 +65,7 @@ sudo apt install -y \
 pip3 install pymoveit2
 ```
 
-如果在 WSL2 / 虚拟机中运行，图形和渲染能力可能受限。当前 launch 默认使用 headless Gazebo，主要通过 RViz2 观察机器人和规划结果。
-
-## 4. 克隆仓库
-
-HTTPS 克隆：
-
-```bash
-cd ~
-git clone https://github.com/KaiSANG121/RobotSim.git
-cd ~/RobotSim
-```
-
-## 5. 编译
-
-第一次 clone 后必须编译：
+## 编译
 
 ```bash
 cd ~/RobotSim
@@ -107,130 +74,231 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-## 6. 启动仿真和节点
+静态检查：
 
-建议使用 4 个终端：一个 launch 仿真，三个分别启动感知、执行、状态机节点。
+```bash
+python3 -m py_compile src/perception_mvp/perception_mvp/*.py src/perception_mvp/launch/task_demo.launch.py
+python3 -c "import xml.etree.ElementTree as ET; ET.parse('alicia_gz_sim/worlds/bin_scene.sdf')"
+ign sdf -k alicia_gz_sim/worlds/bin_scene.sdf
+xacro src/alicia_moveit_config/config/Alicia_D_v5_6_gripper_100mm.urdf.xacro
+```
 
-### 6.1 终端 1：启动 Gazebo + MoveIt2 + RViz2
+## 启动仿真
+
+建议每次启动前清理残留进程：
 
 ```bash
 cd ~/RobotSim
 source setup_env.sh
 source install/setup.bash
-bash ~/RobotSim/cleanup.sh
-ros2 launch alicia_moveit_config sim_demo.launch.py
+bash cleanup.sh
 ```
 
-说明：
-
-- `cleanup.sh` 用于清理上一次仿真残留的 `move_group`、controller、Gazebo 相关进程。
-- 建议每次重新 launch 前都先执行 cleanup。
-- launch 成功后，等待终端出现类似 `You can start planning now!`。
-
-### 6.2 终端 2：启动颜色感知节点
+Headless Gazebo + MoveIt2：
 
 ```bash
-cd ~/RobotSim
-source setup_env.sh
-source install/setup.bash
-
-ros2 run perception_mvp color_perception_node --ros-args -p use_sim_time:=true
+ros2 launch alicia_moveit_config sim_demo.launch.py \
+  use_rviz:=false \
+  headless:=true \
+  render_engine:=auto
 ```
 
-### 6.3 终端 3：启动 MoveIt2 执行节点
+如果 Nano 已经接显示器，需要本地看 RViz：
 
 ```bash
-cd ~/RobotSim
-source setup_env.sh
-source install/setup.bash
-
-ros2 run perception_mvp move_to_pregrasp_node --ros-args -p use_sim_time:=true
+ros2 launch alicia_moveit_config sim_demo.launch.py \
+  use_rviz:=true \
+  headless:=false \
+  render_engine:=auto
 ```
 
-### 6.4 终端 4：启动任务状态机节点
+等待 `move_group` 日志出现 `You can start planning now!` 后，再启动任务。
+
+## 真实物理抓取
+
+多物体闭环：
 
 ```bash
-cd ~/RobotSim
-source setup_env.sh
-source install/setup.bash
-
-ros2 run perception_mvp task_state_machine_node --ros-args -p use_sim_time:=true
+ros2 launch perception_mvp task_demo.launch.py \
+  target_sequence:="['red_cylinder','yellow_box','brown_cube']" \
+  grasp_mode:=physical \
+  grasp_style:=auto
 ```
 
-`use_sim_time:=true` 很重要。Gazebo 发布的是仿真时间，如果节点不用仿真时间，MoveIt2 可能认为 `/joint_states` 时间戳过旧，从而拒绝执行轨迹。
+单物体调试：
 
-## 7. 推荐启动顺序
+```bash
+ros2 launch perception_mvp task_demo.launch.py \
+  target_sequence:="['red_cylinder']" \
+  grasp_mode:=physical \
+  grasp_style:=top_down
+```
 
-建议顺序：
+`grasp_mode:=physical` 不会启动 `virtual_grasp_node`，日志中也不应出现 `Attached target=...`。物体移动应来自夹爪 collision、Gazebo contact/friction 和夹爪 effort 控制。
 
-1. 启动 `sim_demo.launch.py`。
-2. 等待 MoveIt2 和 controller 完全 ready。
-3. 启动 `color_perception_node`。
-4. 启动 `move_to_pregrasp_node`。
-5. 最后启动 `task_state_machine_node`。
-
-状态机启动后会按目标顺序执行抓取流程：检测目标、移动到预抓取位姿、夹爪闭合、移动到放置位姿、夹爪打开，然后切换下一个目标。
-
-## 8. 当前夹爪控制状态
-
-当前夹爪使用：
-
-- `Gripper_controller`
-- `FollowJointTrajectory`
-- `effort` command interface
-- controller PID
-- `right_finger` 通过 URDF mimic 跟随 `Gripper`
-
-关键配置文件：
+当前 `physical + auto` 会解析为 `top_down`，但这里的 top_down 不是严格竖直 wrist 姿态，而是 Alicia-D 当前 IK 更容易到达的上方夹取姿态：
 
 ```text
-alicia_gz_sim/config/alicia_d_ros2_controllers.yaml
-src/alicia_moveit_config/config/alicia_d.ros2_control.xacro
-src/alicia_d_descriptions/urdf/Alicia_D_v5_6/Alicia_D_v5_6_gripper_100mm.urdf
+grasp_rpy_deg = [180.0, 90.0, 0.0]
+grasp_reference_offset_xyz = [0.0, 0.0, 0.0]
+gripper_close_position = 0.040
+goal_pose_joint_fallback_min_z = -1.0
 ```
 
-当前 PID 参数：
+默认按目标的下探深度：
 
-```yaml
-gains:
-  Gripper:
-    p: 200.0
-    i: 0.5
-    d: 5.0
-    i_clamp: 10.0
-    ff_velocity_scale: 0.0
+```text
+red_cylinder: -0.075
+yellow_box:   -0.040
+brown_cube:   -0.040
 ```
 
-## 9. Topic 接口概览
+这些值可以在 launch 时覆盖：
 
-感知节点常用输出：
+```bash
+ros2 launch perception_mvp task_demo.launch.py \
+  target_sequence:="['red_cylinder','yellow_box','brown_cube']" \
+  grasp_mode:=physical \
+  grasp_height_offsets:="[-0.075,-0.040,-0.040]" \
+  gripper_close_position:=0.040 \
+  place_slots_xyz:="[-0.36,-0.145,0.28,-0.31,-0.145,0.28,-0.26,-0.145,0.28]"
+```
 
-| Topic | 类型 | 说明 |
-| --- | --- | --- |
-| `/perception/current_target_visible` | `std_msgs/Bool` | 当前目标是否可见 |
-| `/perception/current_target_point_world` | `geometry_msgs/PointStamped` | 当前目标世界坐标 |
-| `/perception/current_target_pregrasp_world` | `geometry_msgs/PointStamped` | 当前目标预抓取坐标 |
-| `/perception/current_target_name_echo` | `std_msgs/String` | 当前目标名回显 |
+## 严格竖直诊断姿态
 
-状态机常用输出：
+严格竖直姿态保留为诊断模式：
 
-| Topic | 类型 | 说明 |
-| --- | --- | --- |
-| `/task/current_target_name` | `std_msgs/String` | 指示感知节点关注哪个目标 |
-| `/task/enable_pregrasp` | `std_msgs/Bool` | 触发预抓取运动 |
-| `/task/goal_pose_world` | `geometry_msgs/PoseStamped` | 放置目标位姿 |
-| `/task/execute_goal_pose` | `std_msgs/Bool` | 触发放置运动 |
-| `/task/gripper_command` | `std_msgs/Float64` | 夹爪命令，`0.0=open`，`0.05=close` |
+```bash
+ros2 launch perception_mvp task_demo.launch.py \
+  target_sequence:="['red_cylinder']" \
+  grasp_mode:=physical \
+  grasp_style:=strict_top_down
+```
 
-执行节点常用反馈：
+在当前 Alicia-D IK 和默认场景下，`strict_top_down` 使用 `grasp_rpy_deg=[180.0, 0.0, 90.0]`，验证时 pregrasp 规划会 `STATUS_ABORTED`，因此默认仍使用可达的 `top_down=[180.0,90.0,0.0]`。
 
-| Topic | 类型 | 说明 |
-| --- | --- | --- |
-| `/task/pregrasp_done` | `std_msgs/Bool` | 预抓取运动完成 |
-| `/task/goal_pose_done` | `std_msgs/Bool` | 放置运动完成 |
-| `/task/gripper_done` | `std_msgs/Bool` | 夹爪 action 完成 |
-| `/task/gripper_success` | `std_msgs/Bool` | 夹爪 action 是否成功 |
+## 虚拟附着 fallback
 
----
+虚拟模式用于对比状态机和感知流程，不代表真实物理抓取：
 
-最后更新：2026-04-29
+```bash
+ros2 launch perception_mvp task_demo.launch.py \
+  target_sequence:="['red_cylinder','yellow_box','brown_cube']" \
+  grasp_mode:=virtual
+```
+
+此模式会启动 `virtual_grasp_node`，在夹爪闭合后用 Gazebo `set_pose` 让物体跟随夹爪。
+
+## 主要节点
+
+```text
+color_perception_node
+  订阅 RGB-D 图像，按当前目标颜色检测 red_cylinder / yellow_box / brown_cube。
+
+move_to_pregrasp_node
+  接收状态机触发，执行 MoveIt2 pregrasp、grasp、lift、place 和 gripper action。
+
+task_state_machine_node
+  按 target_sequence 顺序执行 detect -> pregrasp -> grasp_approach (gripper 部分收窄)
+  -> descend -> close -> lift -> place -> open。
+
+virtual_grasp_node
+  仅 virtual 模式启动，用 set_pose 模拟附着。
+```
+
+## 抓取下爪前的夹爪收窄
+
+为了减少下爪过程中夹爪手指 pad 与邻居物体的横向碰撞，状态机在 `VERIFY_PREGRASP` 之后插入了一个
+`GRIPPER_APPROACH` 阶段，把夹爪从全开 (`Gripper=0.0`，pad 横向跨度 ≈ 15.5cm) 收到 `gripper_approach_position`
+(默认 `0.010`，pad 跨度 ≈ 13.5cm；指间间隙仍有 ≈ 8.3cm，足以包住直径 7cm 的圆柱)。
+
+可在 launch 时覆盖：
+
+```bash
+ros2 launch perception_mvp task_demo.launch.py \
+  target_sequence:="['red_cylinder','yellow_box','brown_cube']" \
+  grasp_mode:=physical \
+  gripper_approach_position:=0.012
+```
+
+## 在 Jetson Nano 上看 RViz
+
+Nano 接显示器后, 把 `use_rviz:=true` 让 RViz 直接在本地启动。Gazebo GUI 在 Nano 上比较吃 GPU,
+仍然推荐 `headless:=true` 让 Gazebo 跑 server-only, 由 RViz 负责可视化。
+
+```bash
+cd ~/RobotSim
+source setup_env.sh
+source install/setup.bash
+bash cleanup.sh
+
+ros2 launch alicia_moveit_config sim_demo.launch.py \
+  use_rviz:=true \
+  headless:=true \
+  render_engine:=auto
+```
+
+看到 `You can start planning now!` 后, 在另一个终端起任务:
+
+```bash
+cd ~/RobotSim
+source setup_env.sh
+source install/setup.bash
+
+ros2 launch perception_mvp task_demo.launch.py \
+  target_sequence:="['red_cylinder','yellow_box','brown_cube']" \
+  grasp_mode:=physical \
+  grasp_style:=top_down
+```
+
+RViz 中默认就有 `RobotModel`、`PlanningScene`、`TF` 显示项。手动加这几个看抓取闭环很直观:
+
+- `Marker` → topic `/perception/target_marker`, 每个目标会出现一个彩色小球, 颜色对应 red/yellow/brown
+- `MotionPlanning` 面板 → Planning Group 选 `Alicia` 可以看 MoveIt 规划轨迹
+- 跟进状态机: 终端里 `ros2 topic echo /task/state` 和 `ros2 topic echo /task/status_text`
+
+如果 Nano 没接显示器, 远端 SSH 看 RViz 推荐用 VNC 而不是 X-forwarding —— RViz 的 OpenGL 上下文在
+X-forwarding 下经常崩。VNC 服务跑在 Nano 上, 用客户端连进去看本机渲染的 RViz 即可。
+
+## 常用观察命令
+
+```bash
+ros2 topic echo /task/state
+ros2 topic echo /task/status_text
+ros2 topic echo /perception/current_target_point_world
+ros2 topic echo /joint_states --once
+ros2 control list_controllers
+```
+
+检查 Gazebo 里有哪些 topic：
+
+```bash
+ign topic -l
+```
+
+## 调参顺序
+
+如果 pregrasp 失败，先把物体向工作区中心移动，优先保持 `x` 在 `-0.38` 到 `-0.25`、`y` 在 `0.10` 到 `0.21`。
+
+如果下探失败，先允许或保留 joint fallback：
+
+```bash
+goal_pose_joint_fallback_min_z:=-1.0
+```
+
+如果夹到但滑落，按顺序试：
+
+```text
+gripper_close_position: 0.040 -> 0.045
+grasp_height_offsets: 单个目标再下探 0.005m
+finger/object friction: 最后再继续提高
+```
+
+如果物体被一侧手指推走，优先调：
+
+```bash
+grasp_reference_offset_xyz:="[0.0,0.0,0.0]"
+grasp_position_offset_xyz:="[0.0,0.0,0.0]"
+```
+
+最后更新：2026-05-03

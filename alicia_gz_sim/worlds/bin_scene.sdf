@@ -104,61 +104,9 @@
     <!-- ========================= -->
 
     <!-- ========================= -->
-    <!-- Bin A: 取料仓（机器人前方左侧）-->
+    <!-- 取料区（机器人前方左侧）  -->
+    <!-- 无仓体，物体直接放在地面，降低真实物理抓取碰撞难度 -->
     <!-- ========================= -->
-
-    <model name="bin_a_floor">
-      <static>true</static>
-      <pose>-0.36 0.18 0.005 0 0 0</pose>
-      <link name="link">
-        <collision name="collision">
-          <geometry><box><size>0.30 0.22 0.01</size></box></geometry>
-        </collision>
-        <visual name="visual">
-          <geometry><box><size>0.30 0.22 0.01</size></box></geometry>
-          <material>
-            <ambient>0.7 0.85 1.0 1</ambient>
-            <diffuse>0.7 0.85 1.0 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
-
-    <model name="bin_a_wall_front">
-      <static>true</static>
-      <pose>-0.36 0.285 0.06 0 0 0</pose>
-      <link name="link">
-        <collision name="collision"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></visual>
-      </link>
-    </model>
-
-    <model name="bin_a_wall_back">
-      <static>true</static>
-      <pose>-0.36 0.075 0.06 0 0 0</pose>
-      <link name="link">
-        <collision name="collision"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></visual>
-      </link>
-    </model>
-
-    <model name="bin_a_wall_left">
-      <static>true</static>
-      <pose>-0.215 0.18 0.06 0 0 0</pose>
-      <link name="link">
-        <collision name="collision"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></visual>
-      </link>
-    </model>
-
-    <model name="bin_a_wall_right">
-      <static>true</static>
-      <pose>-0.505 0.18 0.06 0 0 0</pose>
-      <link name="link">
-        <collision name="collision"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></visual>
-      </link>
-    </model>
 
     <!-- ========================= -->
     <!-- Bin B: 放料仓（机器人前方右侧）-->
@@ -183,49 +131,51 @@
 
     <model name="bin_b_wall_front">
       <static>true</static>
-      <pose>-0.36 -0.075 0.06 0 0 0</pose>
+      <pose>-0.36 -0.075 0.03 0 0 0</pose>
       <link name="link">
-        <collision name="collision"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></visual>
+        <collision name="collision"><geometry><box><size>0.30 0.01 0.06</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.30 0.01 0.06</size></box></geometry></visual>
       </link>
     </model>
 
     <model name="bin_b_wall_back">
       <static>true</static>
-      <pose>-0.36 -0.285 0.06 0 0 0</pose>
+      <pose>-0.36 -0.285 0.03 0 0 0</pose>
       <link name="link">
-        <collision name="collision"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>0.30 0.01 0.12</size></box></geometry></visual>
+        <collision name="collision"><geometry><box><size>0.30 0.01 0.06</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.30 0.01 0.06</size></box></geometry></visual>
       </link>
     </model>
 
     <model name="bin_b_wall_left">
       <static>true</static>
-      <pose>-0.215 -0.18 0.06 0 0 0</pose>
+      <pose>-0.215 -0.18 0.03 0 0 0</pose>
       <link name="link">
-        <collision name="collision"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></visual>
+        <collision name="collision"><geometry><box><size>0.01 0.22 0.06</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.01 0.22 0.06</size></box></geometry></visual>
       </link>
     </model>
 
     <model name="bin_b_wall_right">
       <static>true</static>
-      <pose>-0.505 -0.18 0.06 0 0 0</pose>
+      <pose>-0.505 -0.18 0.03 0 0 0</pose>
       <link name="link">
-        <collision name="collision"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></collision>
-        <visual name="visual"><geometry><box><size>0.01 0.22 0.12</size></box></geometry></visual>
+        <collision name="collision"><geometry><box><size>0.01 0.22 0.06</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.01 0.22 0.06</size></box></geometry></visual>
       </link>
     </model>
 
     <!-- ========================= -->
-    <!-- Bin A 内 3 个测试物体      -->
+    <!-- 取料区内 3 个测试物体      -->
     <!-- 全部动态 (FR-1.3)          -->
     <!-- ========================= -->
 
-    <!-- 黄色方块 (yellow_box) -->
+    <!-- 黄色长方体 (yellow_box) -->
+    <!-- 摆放间距: 与 red_cylinder y 间距 ≥0.085m, 与 brown_cube x 间距 ≥0.0375m, -->
+    <!-- 同时保持距离基座 ≤0.40m, 不超出机械臂可达范围。 -->
     <model name="test_box">
       <static>false</static>
-      <pose>-0.40 0.17 0.055 0 0 0.4</pose>
+      <pose>-0.36 0.10 0.035 0 0 1.5708</pose>
       <link name="link">
         <inertial>
           <mass>0.15</mass>
@@ -238,7 +188,22 @@
         <collision name="collision">
           <geometry><box><size>0.06 0.10 0.07</size></box></geometry>
           <surface>
-            <friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+            <friction>
+              <ode>
+                <mu>8.0</mu>
+                <mu2>8.0</mu2>
+                <slip1>0.0</slip1>
+                <slip2>0.0</slip2>
+              </ode>
+            </friction>
+            <contact>
+              <ode>
+                <kp>200000</kp>
+                <kd>40</kd>
+                <max_vel>0.01</max_vel>
+                <min_depth>0.001</min_depth>
+              </ode>
+            </contact>
           </surface>
         </collision>
         <visual name="visual">
@@ -254,7 +219,7 @@
     <!-- 红色圆柱 (red_cylinder) -->
     <model name="test_can">
       <static>false</static>
-      <pose>-0.35 0.20 0.065 0 0 0</pose>
+      <pose>-0.30 0.255 0.055 0 0 0</pose>
       <link name="link">
         <inertial>
           <mass>0.10</mass>
@@ -272,7 +237,22 @@
             </cylinder>
           </geometry>
           <surface>
-            <friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+            <friction>
+              <ode>
+                <mu>8.0</mu>
+                <mu2>8.0</mu2>
+                <slip1>0.0</slip1>
+                <slip2>0.0</slip2>
+              </ode>
+            </friction>
+            <contact>
+              <ode>
+                <kp>200000</kp>
+                <kd>40</kd>
+                <max_vel>0.01</max_vel>
+                <min_depth>0.001</min_depth>
+              </ode>
+            </contact>
           </surface>
         </collision>
         <visual name="visual">
@@ -290,27 +270,42 @@
       </link>
     </model>
 
-    <!-- 棕色球体 (brown_sphere) -->
-    <model name="test_potato_proxy">
+    <!-- 棕色正方体 (brown_cube) -->
+    <model name="test_brown_cube">
       <static>false</static>
-      <pose>-0.31 0.15 0.05 0 0 0</pose>
+      <pose>-0.24 0.10 0.0325 0 0 0</pose>
       <link name="link">
         <inertial>
           <mass>0.08</mass>
           <inertia>
-            <ixx>0.0000512</ixx><ixy>0</ixy><ixz>0</ixz>
-            <iyy>0.0000512</iyy><iyz>0</iyz>
-            <izz>0.0000512</izz>
+            <ixx>0.0000563</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>0.0000563</iyy><iyz>0</iyz>
+            <izz>0.0000563</izz>
           </inertia>
         </inertial>
         <collision name="collision">
-          <geometry><sphere><radius>0.04</radius></sphere></geometry>
+          <geometry><box><size>0.065 0.065 0.065</size></box></geometry>
           <surface>
-            <friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+            <friction>
+              <ode>
+                <mu>8.0</mu>
+                <mu2>8.0</mu2>
+                <slip1>0.0</slip1>
+                <slip2>0.0</slip2>
+              </ode>
+            </friction>
+            <contact>
+              <ode>
+                <kp>200000</kp>
+                <kd>40</kd>
+                <max_vel>0.01</max_vel>
+                <min_depth>0.001</min_depth>
+              </ode>
+            </contact>
           </surface>
         </collision>
         <visual name="visual">
-          <geometry><sphere><radius>0.04</radius></sphere></geometry>
+          <geometry><box><size>0.065 0.065 0.065</size></box></geometry>
           <material>
             <ambient>0.55 0.30 0.10 1</ambient>
             <diffuse>0.55 0.30 0.10 1</diffuse>
@@ -321,12 +316,12 @@
 
     <!-- ========================= -->
     <!-- 俯视 RGB-D 相机（静态）   -->
-    <!-- 位置: Bin A 正上方         -->
+    <!-- 位置: 取料区正上方         -->
     <!-- ========================= -->
 
     <model name="overhead_rgbd_camera">
       <static>true</static>
-      <!-- pose: x=BinA_x, y=BinA_y, z=0.85m 高, 俯视朝下 (pitch=90°) -->
+      <!-- pose: x=取料区中心, y=取料区中心, z=0.85m 高, 俯视朝下 (pitch=90°) -->
       <pose>-0.36 0.18 0.85 0 1.5708 0</pose>
 
       <link name="camera_link">

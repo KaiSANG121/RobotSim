@@ -7,7 +7,6 @@ import numpy as np
 import rclpy
 from rclpy.duration import Duration
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
 
 from cv_bridge import CvBridge
 from geometry_msgs.msg import PointStamped
@@ -29,6 +28,7 @@ class ColorPerceptionNode(Node):
         self.depth_msg = None
         self.camera_info_msg = None
         self._last_missing_log_time = 0.0
+        self._last_detection_log_time = {}
 
         self.fx = None
         self.fy = None
@@ -51,6 +51,10 @@ class ColorPerceptionNode(Node):
         self.declare_parameter('pregrasp_height', 0.10)
         self.pregrasp_height = self.get_parameter(
             'pregrasp_height').get_parameter_value().double_value
+        self.declare_parameter('detection_log_period_sec', 2.0)
+        self.detection_log_period_sec = float(
+            self.get_parameter('detection_log_period_sec').value
+        )
         self.declare_parameter('bin_a_workspace_min', [-0.55, 0.05, -0.05])
         self.declare_parameter('bin_a_workspace_max', [-0.15, 0.34, 0.35])
         self.bin_a_workspace_min = [
@@ -81,7 +85,7 @@ class ColorPerceptionNode(Node):
                 'marker_color': (1.0, 1.0, 0.0),
                 'marker_id': 1,
             },
-            'brown_sphere': {
+            'brown_cube': {
                 'hsv_ranges': [
                     ((5, 60, 30), (25, 255, 200)),
                 ],
@@ -104,19 +108,19 @@ class ColorPerceptionNode(Node):
             Image,
             '/rgbd_camera/image',
             self.rgb_callback,
-            qos_profile_sensor_data
+            10
         )
         self.create_subscription(
             Image,
             '/rgbd_camera/depth_image',
             self.depth_callback,
-            qos_profile_sensor_data
+            10
         )
         self.create_subscription(
             CameraInfo,
             '/rgbd_camera/camera_info',
             self.camera_info_callback,
-            qos_profile_sensor_data
+            10
         )
 
         # 新增：由状态机动态指定当前目标
@@ -296,9 +300,10 @@ class ColorPerceptionNode(Node):
 
             if result is None:
                 self.delete_marker(cfg['marker_id'])
-                self.get_logger().info(
-                    f'target={target_name}, visible=False'
-                )
+                if self.should_log_detection(target_name, 'not_visible'):
+                    self.get_logger().info(
+                        f'target={target_name}, visible=False'
+                    )
 
                 if self.target_name != 'all':
                     self.publish_current_visible(False)
@@ -318,18 +323,19 @@ class ColorPerceptionNode(Node):
 
                 if not self.point_in_bin_a_workspace(point_target):
                     self.delete_marker(cfg['marker_id'])
-                    self.get_logger().warn(
-                        f'target={target_name}, visible=True, '
-                        f'but transformed point is outside Bin A workspace; '
-                        f'camera_xyz=({point_camera.point.x:.3f}, '
-                        f'{point_camera.point.y:.3f}, '
-                        f'{point_camera.point.z:.3f}), '
-                        f'{self.target_frame}_xyz=({point_target.point.x:.3f}, '
-                        f'{point_target.point.y:.3f}, '
-                        f'{point_target.point.z:.3f}), '
-                        f'min={self.bin_a_workspace_min}, '
-                        f'max={self.bin_a_workspace_max}'
-                    )
+                    if self.should_log_detection(target_name, 'outside_workspace'):
+                        self.get_logger().warn(
+                            f'target={target_name}, visible=True, '
+                            f'but transformed point is outside Bin A workspace; '
+                            f'camera_xyz=({point_camera.point.x:.3f}, '
+                            f'{point_camera.point.y:.3f}, '
+                            f'{point_camera.point.z:.3f}), '
+                            f'{self.target_frame}_xyz=({point_target.point.x:.3f}, '
+                            f'{point_target.point.y:.3f}, '
+                            f'{point_target.point.z:.3f}), '
+                            f'min={self.bin_a_workspace_min}, '
+                            f'max={self.bin_a_workspace_max}'
+                        )
                     if self.target_name != 'all':
                         self.publish_current_visible(False)
                         self.publish_current_target_name_echo(target_name)
@@ -343,18 +349,19 @@ class ColorPerceptionNode(Node):
                     color_rgb=cfg['marker_color']
                 )
 
-                self.get_logger().info(
-                    f'target={target_name}, '
-                    f'visible=True, '
-                    f'pixel=({result["u"]},{result["v"]}), '
-                    f'depth_valid=True, '
-                    f'camera_xyz=({point_camera.point.x:.3f}, '
-                    f'{point_camera.point.y:.3f}, '
-                    f'{point_camera.point.z:.3f}), '
-                    f'{self.target_frame}_xyz=({point_target.point.x:.3f}, '
-                    f'{point_target.point.y:.3f}, '
-                    f'{point_target.point.z:.3f})'
-                )
+                if self.should_log_detection(target_name, 'visible'):
+                    self.get_logger().info(
+                        f'target={target_name}, '
+                        f'visible=True, '
+                        f'pixel=({result["u"]},{result["v"]}), '
+                        f'depth_valid=True, '
+                        f'camera_xyz=({point_camera.point.x:.3f}, '
+                        f'{point_camera.point.y:.3f}, '
+                        f'{point_camera.point.z:.3f}), '
+                        f'{self.target_frame}_xyz=({point_target.point.x:.3f}, '
+                        f'{point_target.point.y:.3f}, '
+                        f'{point_target.point.z:.3f})'
+                    )
 
                 # 单目标模式下，统一输出
                 if self.target_name != 'all':
@@ -448,6 +455,16 @@ class ColorPerceptionNode(Node):
             and self.bin_a_workspace_min[1] <= p.y <= self.bin_a_workspace_max[1]
             and self.bin_a_workspace_min[2] <= p.z <= self.bin_a_workspace_max[2]
         )
+
+    def should_log_detection(self, target_name: str, state: str) -> bool:
+        key = (target_name, state)
+        now = time.monotonic()
+        last = self._last_detection_log_time.get(key, 0.0)
+        if now - last < self.detection_log_period_sec:
+            return False
+
+        self._last_detection_log_time[key] = now
+        return True
 
     def make_pregrasp_point(self, point_msg: PointStamped):
         pregrasp = PointStamped()
@@ -548,7 +565,18 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        for cfg in node.target_configs.values():
-            node.delete_marker(cfg['marker_id'])
-        node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            for cfg in node.target_configs.values():
+                try:
+                    node.delete_marker(cfg['marker_id'])
+                except Exception:
+                    pass
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass

@@ -13,6 +13,9 @@ __pycache__/
 .vscode/
 .idea/
 
+# External ROS source dependencies fetched by vcs/git
+src/pymoveit2/
+
 # OS/editor metadata
 .DS_Store
 Thumbs.db
@@ -24,3 +27,5 @@ Thumbs.db
 # Large runtime captures
 rosbag2_*/
 *.bag
+jetson_smoke_report.md
+.claude/

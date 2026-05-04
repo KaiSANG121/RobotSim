@@ -5,7 +5,7 @@ from typing import List, Optional
 import rclpy
 from rclpy.node import Node
 
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PointStamped, PoseStamped
 from std_msgs.msg import Bool, Float64, Int32, String
 
 
@@ -29,6 +29,33 @@ def euler_deg_to_quaternion(roll_deg: float, pitch_deg: float, yaw_deg: float):
     return qx, qy, qz, qw
 
 
+def rotate_vector_by_rpy_deg(
+    vector: List[float],
+    roll_deg: float,
+    pitch_deg: float,
+    yaw_deg: float,
+) -> List[float]:
+    roll = math.radians(roll_deg)
+    pitch = math.radians(pitch_deg)
+    yaw = math.radians(yaw_deg)
+
+    cr = math.cos(roll)
+    sr = math.sin(roll)
+    cp = math.cos(pitch)
+    sp = math.sin(pitch)
+    cy = math.cos(yaw)
+    sy = math.sin(yaw)
+
+    x, y, z = vector
+    return [
+        (cy * cp) * x + (cy * sp * sr - sy * cr) * y
+        + (cy * sp * cr + sy * sr) * z,
+        (sy * cp) * x + (sy * sp * sr + cy * cr) * y
+        + (sy * sp * cr - cy * sr) * z,
+        (-sp) * x + (cp * sr) * y + (cp * cr) * z,
+    ]
+
+
 class TaskStateMachineNode(Node):
     def __init__(self):
         super().__init__("task_state_machine_node")
@@ -38,7 +65,7 @@ class TaskStateMachineNode(Node):
         # ==================================================
         self.declare_parameter(
             "target_sequence",
-            ["red_cylinder", "yellow_box", "brown_sphere"],
+            ["red_cylinder", "yellow_box", "brown_cube"],
         )
         self.declare_parameter("target_frame", "world")
 
@@ -46,8 +73,14 @@ class TaskStateMachineNode(Node):
         self.declare_parameter("target_settle_sec", 0.8)
         self.declare_parameter("target_visible_timeout_sec", 3.0)
         self.declare_parameter("declutter_candidate_visible_timeout_sec", 1.5)
+        self.declare_parameter("executor_match_timeout_sec", 5.0)
 
         self.declare_parameter("verify_pregrasp_wait_sec", 0.5)
+        self.declare_parameter("grasp_height_offset", 0.035)
+        self.declare_parameter("grasp_height_offsets", [0.035])
+        self.declare_parameter("grasp_position_offset_xyz", [0.0, 0.0, 0.0])
+        self.declare_parameter("grasp_reference_offset_xyz", [0.0, 0.0, 0.0])
+        self.declare_parameter("grasp_rpy_deg", [180.0, 90.0, 0.0])
         # Gripper action uses sim time, while this state machine uses wall time.
         # On slow Gazebo, 3s sim time can exceed 15s wall time, so this fallback
         # must stay longer than the executor's gripper_result_timeout_sec.
@@ -55,23 +88,39 @@ class TaskStateMachineNode(Node):
         self.declare_parameter("virtual_release_wait_sec", 35.0)
         self.declare_parameter("max_gripper_retries", 2)
 
+        self.declare_parameter("max_grasp_retries", 1)
         self.declare_parameter("max_declutter_per_target", 1)
         self.declare_parameter("max_place_retries", 1)
 
-        # Bin B hover pose
-        self.declare_parameter("place_xyz", [-0.36, -0.18, 0.28])
+        # Bin B hover pose. The y value stops a little before the bin center so
+        # the carried object keeps more margin from the far wall during release.
+        self.declare_parameter("place_xyz", [-0.36, -0.145, 0.28])
+        self.declare_parameter("place_slots_xyz", [-0.36, -0.145, 0.28])
         # Keep place hover orientation aligned with grasp_rpy to avoid a large
         # wrist flip from pregrasp to Bin B.
         self.declare_parameter("place_rpy_deg", [180.0, 90.0, 0.0])
 
         # Declutter temporary hover pose
-        self.declare_parameter("declutter_temp_xyz", [-0.36, -0.18, 0.28])
+        self.declare_parameter("declutter_temp_xyz", [-0.36, -0.145, 0.28])
         # Same orientation as place/grasp; declutter uses the same hover target.
         self.declare_parameter("declutter_temp_rpy_deg", [180.0, 90.0, 0.0])
+
+        # Lift after closing before moving laterally between bins. This keeps
+        # the virtual attached object above the bin walls during transport.
+        self.declare_parameter("carry_lift_enabled", True)
+        self.declare_parameter("carry_lift_z", 0.32)
 
         # Gripper control positions: 0.0 = open, 0.05 = closed (FR-5.2)
         self.declare_parameter("gripper_close_position", 0.05)
         self.declare_parameter("gripper_open_position", 0.0)
+        # Partial-open opening used during the descent before closing.
+        # 0=fully open (~10.3cm gap, ~15.5cm outer pad span);
+        # 0.010 → ~8.3cm gap (still wider than the largest object 7cm) but
+        # ~13.5cm outer span, so the finger pads stick out 1cm less per side
+        # while descending past neighbor objects.
+        self.declare_parameter("gripper_approach_position", 0.010)
+        # Wait budget for the partial-open command before falling back to MOVE_TO_GRASP.
+        self.declare_parameter("gripper_approach_wait_sec", 20.0)
 
         self.target_sequence: List[str] = list(
             self.get_parameter("target_sequence").value
@@ -90,10 +139,32 @@ class TaskStateMachineNode(Node):
         self.declutter_candidate_visible_timeout_sec: float = float(
             self.get_parameter("declutter_candidate_visible_timeout_sec").value
         )
+        self.executor_match_timeout_sec: float = float(
+            self.get_parameter("executor_match_timeout_sec").value
+        )
 
         self.verify_pregrasp_wait_sec: float = float(
             self.get_parameter("verify_pregrasp_wait_sec").value
         )
+        self.grasp_height_offset: float = float(
+            self.get_parameter("grasp_height_offset").value
+        )
+        self.grasp_height_offsets = [
+            float(v) for v in self.get_parameter("grasp_height_offsets").value
+        ]
+        self.grasp_position_offset_xyz = [
+            float(v) for v in self.get_parameter("grasp_position_offset_xyz").value
+        ]
+        if len(self.grasp_position_offset_xyz) != 3:
+            self.grasp_position_offset_xyz = [0.0, 0.0, 0.0]
+        self.grasp_reference_offset_xyz = [
+            float(v) for v in self.get_parameter("grasp_reference_offset_xyz").value
+        ]
+        if len(self.grasp_reference_offset_xyz) != 3:
+            self.grasp_reference_offset_xyz = [0.0, 0.0, 0.0]
+        self.grasp_rpy_deg = [
+            float(v) for v in self.get_parameter("grasp_rpy_deg").value
+        ]
         self.virtual_grasp_wait_sec: float = float(
             self.get_parameter("virtual_grasp_wait_sec").value
         )
@@ -104,6 +175,9 @@ class TaskStateMachineNode(Node):
             self.get_parameter("max_gripper_retries").value
         )
 
+        self.max_grasp_retries: int = int(
+            self.get_parameter("max_grasp_retries").value
+        )
         self.max_declutter_per_target: int = int(
             self.get_parameter("max_declutter_per_target").value
         )
@@ -117,6 +191,26 @@ class TaskStateMachineNode(Node):
             place_xyz[0], place_xyz[1], place_xyz[2],
             place_rpy[0], place_rpy[1], place_rpy[2]
         )
+        place_slots_xyz = [
+            float(v) for v in self.get_parameter("place_slots_xyz").value
+        ]
+        if len(place_slots_xyz) % 3 != 0:
+            self.get_logger().warn(
+                "place_slots_xyz length must be a multiple of 3; "
+                "falling back to place_xyz for all targets."
+            )
+            place_slots_xyz = []
+        self.place_poses = [
+            self.build_pose(
+                place_slots_xyz[i],
+                place_slots_xyz[i + 1],
+                place_slots_xyz[i + 2],
+                place_rpy[0],
+                place_rpy[1],
+                place_rpy[2],
+            )
+            for i in range(0, len(place_slots_xyz), 3)
+        ]
 
         declutter_xyz = [
             float(v) for v in self.get_parameter("declutter_temp_xyz").value
@@ -128,12 +222,24 @@ class TaskStateMachineNode(Node):
             declutter_xyz[0], declutter_xyz[1], declutter_xyz[2],
             declutter_rpy[0], declutter_rpy[1], declutter_rpy[2]
         )
+        self.carry_lift_enabled: bool = bool(
+            self.get_parameter("carry_lift_enabled").value
+        )
+        self.carry_lift_z: float = float(
+            self.get_parameter("carry_lift_z").value
+        )
 
         self.gripper_close_position: float = float(
             self.get_parameter("gripper_close_position").value
         )
         self.gripper_open_position: float = float(
             self.get_parameter("gripper_open_position").value
+        )
+        self.gripper_approach_position: float = float(
+            self.get_parameter("gripper_approach_position").value
+        )
+        self.gripper_approach_wait_sec: float = float(
+            self.get_parameter("gripper_approach_wait_sec").value
         )
 
         # ==================================================
@@ -154,11 +260,14 @@ class TaskStateMachineNode(Node):
         self.current_declutter_candidate: Optional[str] = None
 
         self.place_retry_count: int = 0
+        self.grasp_retry_count: int = 0
         self.gripper_retry_count: int = 0
 
         # Latest inputs
         self.current_target_visible: bool = False
         self.current_target_name_echo: str = ""
+        self.latest_target_point_world: Optional[PointStamped] = None
+        self.grasp_target_point_world: Optional[PointStamped] = None
 
         self.pregrasp_running: bool = False
         self.pregrasp_done: bool = False
@@ -185,6 +294,12 @@ class TaskStateMachineNode(Node):
             String,
             "/perception/current_target_name_echo",
             self.current_target_name_echo_callback,
+            10,
+        )
+        self.create_subscription(
+            PointStamped,
+            "/perception/current_target_point_world",
+            self.current_target_point_world_callback,
             10,
         )
 
@@ -288,7 +403,11 @@ class TaskStateMachineNode(Node):
         self.get_logger().info(
             "task_state_machine_node started. "
             f"target_sequence={self.target_sequence}, "
-            f"target_frame={self.target_frame}"
+            f"target_frame={self.target_frame}, "
+            f"grasp_height_offset={self.grasp_height_offset:.4f}, "
+            f"grasp_height_offsets="
+            f"{[round(v, 4) for v in self.grasp_height_offsets]}, "
+            f"place_slots={len(self.place_poses)}"
         )
         self.publish_state()
         self.publish_status("Initialized")
@@ -301,6 +420,9 @@ class TaskStateMachineNode(Node):
 
     def current_target_name_echo_callback(self, msg: String):
         self.current_target_name_echo = msg.data.strip()
+
+    def current_target_point_world_callback(self, msg: PointStamped):
+        self.latest_target_point_world = msg
 
     def pregrasp_running_callback(self, msg: Bool):
         self.pregrasp_running = bool(msg.data)
@@ -374,6 +496,12 @@ class TaskStateMachineNode(Node):
             self.gripper_retry_count = 0
             self.reset_gripper_flags()
             self.publish_gripper_command(self.gripper_close_position)
+        elif new_state == "GRIPPER_APPROACH":
+            # 下爪前先把夹爪从全开收到 approach 开度, 减少 pad 外缘横向占用,
+            # 避免下落时碰到邻居物体。
+            self.gripper_retry_count = 0
+            self.reset_gripper_flags()
+            self.publish_gripper_command(self.gripper_approach_position)
         elif new_state in ("VIRTUAL_RELEASE", "DECLUTTER_VIRTUAL_RELEASE"):
             self.gripper_retry_count = 0
             self.reset_gripper_flags()
@@ -400,10 +528,20 @@ class TaskStateMachineNode(Node):
     def publish_current_target_name(self, target_name: str):
         self.expected_target_name = target_name
         self.current_target_visible = False  # 本地先清掉，等 perception 刷新
+        self.latest_target_point_world = None
+        self.grasp_target_point_world = None
         msg = String()
         msg.data = target_name
         self.current_target_name_pub.publish(msg)
         self.get_logger().info(f"Publish current target: {target_name}")
+
+    def publish_current_target_name_heartbeat(self):
+        if not self.expected_target_name:
+            return
+
+        msg = String()
+        msg.data = self.expected_target_name
+        self.current_target_name_pub.publish(msg)
 
     def publish_gripper_command(self, position: float):
         msg = Float64()
@@ -455,6 +593,28 @@ class TaskStateMachineNode(Node):
         self.enable_pregrasp_pub.publish(msg)
         self.get_logger().info("Triggered pregrasp executor")
 
+    def pregrasp_executor_ready(self) -> bool:
+        return self.enable_pregrasp_pub.get_subscription_count() > 0
+
+    def goal_pose_executor_ready(self) -> bool:
+        return (
+            self.goal_pose_pub.get_subscription_count() > 0
+            and self.execute_goal_pose_pub.get_subscription_count() > 0
+        )
+
+    def wait_for_executor_match(self, label: str, ready: bool) -> bool:
+        if ready:
+            return True
+
+        if self.time_in_state() < self.executor_match_timeout_sec:
+            return False
+
+        self.get_logger().warn(
+            f"{label} executor subscription not matched after "
+            f"{self.executor_match_timeout_sec:.1f}s; publishing trigger anyway"
+        )
+        return True
+
     def trigger_goal_pose(self, pose: PoseStamped):
         self.reset_goal_pose_flags()
 
@@ -477,8 +637,89 @@ class TaskStateMachineNode(Node):
             return self.target_sequence[self.current_index]
         return None
 
+    def get_current_grasp_height_offset(self) -> float:
+        if 0 <= self.current_index < len(self.grasp_height_offsets):
+            return self.grasp_height_offsets[self.current_index]
+        return self.grasp_height_offset
+
+    def get_current_place_pose(self) -> PoseStamped:
+        if 0 <= self.current_index < len(self.place_poses):
+            return self.place_poses[self.current_index]
+        return self.place_pose
+
     def build_declutter_candidates(self, original_target: str) -> List[str]:
         return [name for name in self.target_sequence if name != original_target]
+
+    def build_gripper_center_xyz(
+        self,
+        reference_x: float,
+        reference_y: float,
+        reference_z: float,
+    ) -> List[float]:
+        offset_world = rotate_vector_by_rpy_deg(
+            self.grasp_reference_offset_xyz,
+            self.grasp_rpy_deg[0],
+            self.grasp_rpy_deg[1],
+            self.grasp_rpy_deg[2],
+        )
+        return [
+            reference_x - offset_world[0],
+            reference_y - offset_world[1],
+            reference_z - offset_world[2],
+        ]
+
+    def build_current_grasp_pose(self) -> Optional[PoseStamped]:
+        point_msg = self.grasp_target_point_world or self.latest_target_point_world
+        if point_msg is None:
+            return None
+
+        p = point_msg.point
+        height_offset = self.get_current_grasp_height_offset()
+        x, y, z = self.build_gripper_center_xyz(
+            p.x + self.grasp_position_offset_xyz[0],
+            p.y + self.grasp_position_offset_xyz[1],
+            p.z + height_offset + self.grasp_position_offset_xyz[2],
+        )
+        self.get_logger().info(
+            f"Build grasp pose target={self.get_current_target_name()}, "
+            f"detected_z={p.z:.3f}, height_offset={height_offset:.4f}, "
+            f"gripper_center=({x:.3f}, {y:.3f}, {z:.3f}), "
+            f"grasp_rpy=({self.grasp_rpy_deg[0]:.0f},"
+            f"{self.grasp_rpy_deg[1]:.0f},{self.grasp_rpy_deg[2]:.0f})"
+        )
+        return self.build_pose(
+            x,
+            y,
+            z,
+            self.grasp_rpy_deg[0],
+            self.grasp_rpy_deg[1],
+            self.grasp_rpy_deg[2],
+        )
+
+    def build_carry_lift_pose(self) -> Optional[PoseStamped]:
+        point_msg = self.grasp_target_point_world or self.latest_target_point_world
+        if point_msg is None:
+            return None
+
+        p = point_msg.point
+        height_offset = self.get_current_grasp_height_offset()
+        z = max(
+            float(self.carry_lift_z),
+            float(p.z) + height_offset + self.grasp_position_offset_xyz[2],
+        )
+        x, y, z = self.build_gripper_center_xyz(
+            p.x + self.grasp_position_offset_xyz[0],
+            p.y + self.grasp_position_offset_xyz[1],
+            z,
+        )
+        return self.build_pose(
+            x,
+            y,
+            z,
+            self.grasp_rpy_deg[0],
+            self.grasp_rpy_deg[1],
+            self.grasp_rpy_deg[2],
+        )
 
     # ==================================================
     # Main step
@@ -486,6 +727,14 @@ class TaskStateMachineNode(Node):
     def step(self):
         self.publish_state()
         self.publish_current_target_index()
+        if self.state not in (
+            "INIT",
+            "SET_TARGET",
+            "NEXT_TARGET",
+            "RESTORE_ORIGINAL_TARGET",
+            "FINISHED",
+        ):
+            self.publish_current_target_name_heartbeat()
 
         if self.state == "INIT":
             if len(self.target_sequence) == 0:
@@ -505,6 +754,7 @@ class TaskStateMachineNode(Node):
 
             self.publish_current_target_name(target_name)
             self.place_retry_count = 0
+            self.grasp_retry_count = 0
             self.set_state("WAIT_TARGET_SETTLE", f"Target={target_name}")
             return
 
@@ -521,6 +771,7 @@ class TaskStateMachineNode(Node):
                 self.perception_aligned_with_expected_target()
                 and self.current_target_visible
             ):
+                self.grasp_target_point_world = self.latest_target_point_world
                 self.set_state(
                     "PLAN_PREGRASP",
                     f"Target visible: {self.expected_target_name}",
@@ -549,6 +800,11 @@ class TaskStateMachineNode(Node):
             return
 
         if self.state == "PLAN_PREGRASP":
+            if not self.wait_for_executor_match(
+                "Pregrasp",
+                self.pregrasp_executor_ready(),
+            ):
+                return
             self.trigger_pregrasp()
             self.set_state("WAIT_PREGRASP_RESULT", "Waiting pregrasp result")
             return
@@ -574,13 +830,67 @@ class TaskStateMachineNode(Node):
 
         if self.state == "VERIFY_PREGRASP":
             if self.time_in_state() >= self.verify_pregrasp_wait_sec:
-                self.set_state("VIRTUAL_GRASP", "Pregrasp verified")
+                self.set_state(
+                    "GRIPPER_APPROACH",
+                    "Pregrasp verified, narrow gripper before descent",
+                )
+            return
+
+        if self.state == "GRIPPER_APPROACH":
+            if self.gripper_done:
+                self.set_state(
+                    "MOVE_TO_GRASP",
+                    f"Gripper narrowed to approach={self.gripper_approach_position:.3f}",
+                )
+            elif self.time_in_state() >= self.gripper_approach_wait_sec:
+                self.get_logger().warn(
+                    "Gripper approach command timed out; "
+                    "proceeding to MOVE_TO_GRASP anyway"
+                )
+                self.set_state(
+                    "MOVE_TO_GRASP",
+                    "Gripper approach timeout, continue to grasp",
+                )
+            return
+
+        if self.state == "MOVE_TO_GRASP":
+            if not self.wait_for_executor_match(
+                "Goal pose",
+                self.goal_pose_executor_ready(),
+            ):
+                return
+            grasp_pose = self.build_current_grasp_pose()
+            if grasp_pose is None:
+                self.set_state("NEXT_TARGET", "No target point for grasp pose")
+                return
+
+            self.trigger_goal_pose(grasp_pose)
+            self.set_state("WAIT_GRASP_RESULT", "Waiting grasp pose result")
+            return
+
+        if self.state == "WAIT_GRASP_RESULT":
+            if self.goal_pose_done:
+                if self.goal_pose_success:
+                    self.set_state("VIRTUAL_GRASP", "Grasp pose success")
+                else:
+                    if self.grasp_retry_count < self.max_grasp_retries:
+                        self.grasp_retry_count += 1
+                        self.set_state(
+                            "MOVE_TO_GRASP",
+                            f"Retry grasp pose "
+                            f"{self.grasp_retry_count}/{self.max_grasp_retries}",
+                        )
+                    else:
+                        self.set_state("NEXT_TARGET", "Grasp pose failed")
             return
 
         if self.state == "VIRTUAL_GRASP":
             if self.gripper_done:
                 if self.gripper_success:
-                    self.set_state("MOVE_TO_PLACE_HOVER", "Gripper closed (success)")
+                    if self.carry_lift_enabled:
+                        self.set_state("LIFT_AFTER_GRASP", "Gripper closed (success)")
+                    else:
+                        self.set_state("MOVE_TO_PLACE_HOVER", "Gripper closed (success)")
                 else:
                     if self.retry_gripper_command(
                         self.gripper_close_position,
@@ -604,8 +914,42 @@ class TaskStateMachineNode(Node):
                 )
             return
 
+        if self.state == "LIFT_AFTER_GRASP":
+            if not self.wait_for_executor_match(
+                "Goal pose",
+                self.goal_pose_executor_ready(),
+            ):
+                return
+            lift_pose = self.build_carry_lift_pose()
+            if lift_pose is None:
+                self.set_state(
+                    "MOVE_TO_PLACE_HOVER",
+                    "No target point for lift pose; continue to place",
+                )
+                return
+
+            self.trigger_goal_pose(lift_pose)
+            self.set_state("WAIT_LIFT_RESULT", "Waiting carry lift result")
+            return
+
+        if self.state == "WAIT_LIFT_RESULT":
+            if self.goal_pose_done:
+                if self.goal_pose_success:
+                    self.set_state("MOVE_TO_PLACE_HOVER", "Carry lift success")
+                else:
+                    self.set_state(
+                        "MOVE_TO_PLACE_HOVER",
+                        "Carry lift failed; continue to place hover",
+                    )
+            return
+
         if self.state == "MOVE_TO_PLACE_HOVER":
-            self.trigger_goal_pose(self.place_pose)
+            if not self.wait_for_executor_match(
+                "Goal pose",
+                self.goal_pose_executor_ready(),
+            ):
+                return
+            self.trigger_goal_pose(self.get_current_place_pose())
             self.set_state("WAIT_PLACE_RESULT", "Waiting place hover result")
             return
 
@@ -722,6 +1066,11 @@ class TaskStateMachineNode(Node):
             return
 
         if self.state == "PLAN_DECLUTTER_PREGRASP":
+            if not self.wait_for_executor_match(
+                "Pregrasp",
+                self.pregrasp_executor_ready(),
+            ):
+                return
             self.trigger_pregrasp()
             self.set_state(
                 "WAIT_DECLUTTER_PREGRASP_RESULT",
@@ -745,6 +1094,11 @@ class TaskStateMachineNode(Node):
             return
 
         if self.state == "MOVE_DECLUTTER_TEMP_PLACE":
+            if not self.wait_for_executor_match(
+                "Goal pose",
+                self.goal_pose_executor_ready(),
+            ):
+                return
             self.trigger_goal_pose(self.declutter_temp_pose)
             self.set_state(
                 "WAIT_DECLUTTER_PLACE_RESULT",
@@ -824,5 +1178,12 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass

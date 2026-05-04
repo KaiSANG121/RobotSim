@@ -4,7 +4,7 @@
         gz_ros2_control hardware interface for Alicia-D 6-DOF + original gripper.
         Replaces the old fake_components/GenericSystem and real hardware xacro.
         Plugin: gz_ros2_control/GazeboSimSystem
-        Joints: Joint1~Joint6 (revolute) + Gripper (prismatic)
+        Joints: Joint1~Joint6 (revolute) + Gripper/right_finger (prismatic)
     -->
     <xacro:macro name="alicia_d_ros2_control" params="name initial_positions_file">
         <xacro:property name="initial_positions"
@@ -74,6 +74,16 @@
                 <command_interface name="effort"/>
                 <state_interface name="position">
                     <param name="initial_value">${initial_positions['Gripper']}</param>
+                </state_interface>
+                <state_interface name="velocity"/>
+            </joint>
+
+            <!-- right_finger is a URDF mimic joint, but Gazebo physics still
+                 needs ros2_control to hold its real simulated joint. -->
+            <joint name="right_finger">
+                <command_interface name="effort"/>
+                <state_interface name="position">
+                    <param name="initial_value">${initial_positions['right_finger']}</param>
                 </state_interface>
                 <state_interface name="velocity"/>
             </joint>

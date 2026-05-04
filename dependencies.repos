@@ -1,0 +1,5 @@
+repositories:
+  src/pymoveit2:
+    type: git
+    url: https://github.com/AndrejOrsula/pymoveit2.git
+    version: 680bdf9e0381bb2abac78c7835a115bcd1086d5f

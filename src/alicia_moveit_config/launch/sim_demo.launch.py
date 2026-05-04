@@ -17,6 +17,7 @@ sim_demo.launch.py — Alicia-D 6-DOF 仿真系统统一启动文件
 
 import os
 import sys
+import tempfile
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -37,9 +38,43 @@ sys.path.append(os.path.dirname(__file__))
 from moveit_config_builder import get_moveit_config
 
 
+def world_file_for_render_engine(source_world_file, render_engine):
+    """Create a temporary world file with the requested sensor render engine."""
+    with open(source_world_file, 'r', encoding='utf-8') as f:
+        world_xml = f.read()
+
+    world_xml = world_xml.replace(
+        '<render_engine>ogre</render_engine>',
+        f'<render_engine>{render_engine}</render_engine>',
+    )
+
+    tmp = tempfile.NamedTemporaryFile(
+        mode='w',
+        encoding='utf-8',
+        suffix=f'_{render_engine}.sdf',
+        prefix='robotsim_bin_scene_',
+        delete=False,
+    )
+    with tmp:
+        tmp.write(world_xml)
+    return tmp.name
+
+
 def launch_setup(context, *args, **kwargs):
     use_rviz = LaunchConfiguration('use_rviz').perform(context).lower() == 'true'
     headless = LaunchConfiguration('headless').perform(context).lower() == 'true'
+    render_engine = LaunchConfiguration('render_engine').perform(context).lower()
+
+    if render_engine == 'auto':
+        if os.environ.get('LIBGL_ALWAYS_SOFTWARE') == '1':
+            render_engine = 'ogre'
+        else:
+            render_engine = 'ogre2'
+
+    if render_engine not in ('ogre', 'ogre2'):
+        raise RuntimeError(
+            f'Unsupported render_engine={render_engine}. Use auto, ogre, or ogre2.'
+        )
 
     # ------------------------------------------------------------------ #
     # MoveIt config
@@ -57,12 +92,20 @@ def launch_setup(context, *args, **kwargs):
     # headless=false: 启动带 GUI 模式，要求宿主机有可用 GPU 直通。
     # ------------------------------------------------------------------ #
     pkg_ros_gz_sim = get_package_share_directory('ros_gz_sim')
-    world_file = os.path.join(
+    source_world_file = os.path.join(
         os.environ.get('HOME', '/root'),
         'RobotSim', 'alicia_gz_sim', 'worlds', 'bin_scene.sdf'
     )
 
-    gz_args = f'-r -s {world_file}' if headless else f'-r {world_file}'
+    world_file = world_file_for_render_engine(source_world_file, render_engine)
+
+    gz_flags = ['-r', '--render-engine-server', render_engine]
+    if headless:
+        gz_flags.append('-s')
+        if render_engine == 'ogre2':
+            gz_flags.append('--headless-rendering')
+
+    gz_args = ' '.join([*gz_flags, world_file])
 
     gz_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -141,11 +184,12 @@ def launch_setup(context, *args, **kwargs):
         'disable_capabilities': '',
         'monitor_dynamics': False,
 
-        # WSL2 software rendering can run Gazebo much slower than wall clock.
-        # Give MoveIt enough execution budget before it cancels a valid plan.
-        'trajectory_execution.allowed_execution_duration_scaling': 5.0,
-        'trajectory_execution.allowed_goal_duration_margin': 2.0,
-        'trajectory_execution.execution_duration_monitoring': True,
+        # Gazebo on small boards can run much slower than wall clock. The
+        # ros2_control trajectory action uses sim time and can still complete,
+        # while MoveIt wall-clock duration monitoring may cancel it early.
+        'trajectory_execution.allowed_execution_duration_scaling': 20.0,
+        'trajectory_execution.allowed_goal_duration_margin': 10.0,
+        'trajectory_execution.execution_duration_monitoring': False,
         'trajectory_execution.allowed_start_tolerance': 0.05,
     }
 
@@ -279,6 +323,14 @@ def generate_launch_description():
                 'Run Gazebo in server-only mode (no GUI window). '
                 'Default true for WSL2 software rendering compatibility. '
                 'Set false only when GPU passthrough is available.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'render_engine',
+            default_value='auto',
+            description=(
+                'Gazebo sensor render engine: auto, ogre, or ogre2. '
+                'auto uses ogre for software rendering and ogre2 otherwise.'
             ),
         ),
         OpaqueFunction(function=launch_setup),

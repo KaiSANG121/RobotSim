@@ -17,7 +17,7 @@ move_to_pregrasp_node.py — 执行层节点（重写版 v2.1）
 import math
 import threading
 import time
-from typing import Optional
+from typing import List, Optional
 
 import rclpy
 from rclpy.action import ActionClient
@@ -34,11 +34,39 @@ from builtin_interfaces.msg import Duration
 from pymoveit2 import MoveIt2
 
 
+def rotate_vector_by_rpy_deg(
+    vector: List[float],
+    roll_deg: float,
+    pitch_deg: float,
+    yaw_deg: float,
+) -> List[float]:
+    roll = math.radians(roll_deg)
+    pitch = math.radians(pitch_deg)
+    yaw = math.radians(yaw_deg)
+
+    cr = math.cos(roll)
+    sr = math.sin(roll)
+    cp = math.cos(pitch)
+    sp = math.sin(pitch)
+    cy = math.cos(yaw)
+    sy = math.sin(yaw)
+
+    x, y, z = vector
+    return [
+        (cy * cp) * x + (cy * sp * sr - sy * cr) * y
+        + (cy * sp * cr + sy * sr) * z,
+        (sy * cp) * x + (sy * sp * sr + cy * cr) * y
+        + (sy * sp * cr - cy * sr) * z,
+        (-sp) * x + (cp * sr) * y + (cp * cr) * z,
+    ]
+
+
 def point_stamped_to_pose_stamped(
     point: PointStamped,
     roll_deg: float = 180.0,
     pitch_deg: float = 90.0,
     yaw_deg: float = 0.0,
+    reference_offset_xyz: Optional[List[float]] = None,
 ) -> PoseStamped:
     """
     将 PointStamped 转换为 PoseStamped，补全末端抓取姿态。
@@ -59,9 +87,17 @@ def point_stamped_to_pose_stamped(
 
     pose = PoseStamped()
     pose.header = point.header
-    pose.pose.position.x = point.point.x
-    pose.pose.position.y = point.point.y
-    pose.pose.position.z = point.point.z
+    if reference_offset_xyz is None:
+        reference_offset_xyz = [0.0, 0.0, 0.0]
+    offset_world = rotate_vector_by_rpy_deg(
+        reference_offset_xyz,
+        roll_deg,
+        pitch_deg,
+        yaw_deg,
+    )
+    pose.pose.position.x = point.point.x - offset_world[0]
+    pose.pose.position.y = point.point.y - offset_world[1]
+    pose.pose.position.z = point.point.z - offset_world[2]
     pose.pose.orientation.x = float(qx)
     pose.pose.orientation.y = float(qy)
     pose.pose.orientation.z = float(qz)
@@ -82,10 +118,18 @@ class MoveToPregraspNode(Node):
         self.declare_parameter('group_name', 'Alicia')
         self.declare_parameter('gripper_group_name', 'Gripper')
         self.declare_parameter('gripper_joint_name', 'Gripper')
+        self.declare_parameter('gripper_joint_names', ['Gripper', 'right_finger'])
+        self.declare_parameter('gripper_joint_multipliers', [1.0, -1.0])
 
         # ===== Motion parameters =====
         self.declare_parameter('use_move_group_action', True)
         self.declare_parameter('cartesian', False)
+        self.declare_parameter('pregrasp_cartesian', False)
+        self.declare_parameter('goal_pose_cartesian', False)
+        self.declare_parameter('goal_pose_joint_fallback', True)
+        self.declare_parameter('goal_pose_joint_fallback_min_z', -1.0)
+        self.declare_parameter('cartesian_max_step', 0.005)
+        self.declare_parameter('cartesian_fraction_threshold', 0.8)
         self.declare_parameter('target_frame', 'world')
         self.declare_parameter('position_tolerance', 0.01)
         self.declare_parameter('orientation_tolerance', 0.05)
@@ -98,6 +142,7 @@ class MoveToPregraspNode(Node):
         self.declare_parameter('grasp_roll_deg', 180.0)
         self.declare_parameter('grasp_pitch_deg', 90.0)
         self.declare_parameter('grasp_yaw_deg', 0.0)
+        self.declare_parameter('grasp_reference_offset_xyz', [0.0, 0.0, 0.0])
 
         # ===== Startup =====
         self.declare_parameter('startup_wait_sec', 5.0)
@@ -115,10 +160,44 @@ class MoveToPregraspNode(Node):
         self.gripper_joint_name = str(
             self.get_parameter('gripper_joint_name').value
         )
+        self.gripper_joint_names = self._read_string_list_parameter(
+            'gripper_joint_names',
+            [self.gripper_joint_name],
+        )
+        self.gripper_joint_multipliers = self._read_float_list_parameter(
+            'gripper_joint_multipliers',
+            [1.0] * len(self.gripper_joint_names),
+        )
+        if len(self.gripper_joint_multipliers) != len(self.gripper_joint_names):
+            self.get_logger().warn(
+                'gripper_joint_multipliers length does not match '
+                'gripper_joint_names; using 1.0 for all gripper joints.'
+            )
+            self.gripper_joint_multipliers = [1.0] * len(self.gripper_joint_names)
         self.use_move_group_action = bool(
             self.get_parameter('use_move_group_action').value
         )
         self.cartesian = bool(self.get_parameter('cartesian').value)
+        self.pregrasp_cartesian = (
+            self.cartesian
+            or bool(self.get_parameter('pregrasp_cartesian').value)
+        )
+        self.goal_pose_cartesian = (
+            self.cartesian
+            or bool(self.get_parameter('goal_pose_cartesian').value)
+        )
+        self.goal_pose_joint_fallback = bool(
+            self.get_parameter('goal_pose_joint_fallback').value
+        )
+        self.goal_pose_joint_fallback_min_z = float(
+            self.get_parameter('goal_pose_joint_fallback_min_z').value
+        )
+        self.cartesian_max_step = float(
+            self.get_parameter('cartesian_max_step').value
+        )
+        self.cartesian_fraction_threshold = float(
+            self.get_parameter('cartesian_fraction_threshold').value
+        )
         self.target_frame = str(self.get_parameter('target_frame').value)
         self.position_tolerance = float(
             self.get_parameter('position_tolerance').value
@@ -139,6 +218,12 @@ class MoveToPregraspNode(Node):
         self.grasp_yaw_deg = float(
             self.get_parameter('grasp_yaw_deg').value
         )
+        self.grasp_reference_offset_xyz = self._read_float_list_parameter(
+            'grasp_reference_offset_xyz',
+            [0.0, 0.0, 0.0],
+        )
+        if len(self.grasp_reference_offset_xyz) != 3:
+            self.grasp_reference_offset_xyz = [0.0, 0.0, 0.0]
         self.startup_wait_sec = float(
             self.get_parameter('startup_wait_sec').value
         )
@@ -265,10 +350,44 @@ class MoveToPregraspNode(Node):
         self.get_logger().info(
             'move_to_pregrasp_node started (v2.1 — event-driven). '
             f'group={group_name}, ee={end_effector_name}, '
+            f'gripper_joints={self.gripper_joint_names}, '
             f'grasp_rpy=({self.grasp_roll_deg:.0f}°,'
             f'{self.grasp_pitch_deg:.0f}°,'
-            f'{self.grasp_yaw_deg:.0f}°)'
+            f'{self.grasp_yaw_deg:.0f}°), '
+            f'grasp_reference_offset_xyz='
+            f'{[round(v, 4) for v in self.grasp_reference_offset_xyz]}'
         )
+
+    def _read_string_list_parameter(
+        self,
+        parameter_name: str,
+        default: List[str],
+    ) -> List[str]:
+        value = self.get_parameter(parameter_name).value
+        if value is None:
+            return list(default)
+        if isinstance(value, str):
+            text = value.strip()
+            return [text] if text else list(default)
+        try:
+            parsed = [str(item) for item in value]
+        except TypeError:
+            return list(default)
+        return parsed or list(default)
+
+    def _read_float_list_parameter(
+        self,
+        parameter_name: str,
+        default: List[float],
+    ) -> List[float]:
+        value = self.get_parameter(parameter_name).value
+        if value is None:
+            return list(default)
+        try:
+            parsed = [float(item) for item in value]
+        except (TypeError, ValueError):
+            return list(default)
+        return parsed or list(default)
 
     # ------------------------------------------------------------------
     # Subscriber callbacks
@@ -346,12 +465,17 @@ class MoveToPregraspNode(Node):
             )
             return False
 
+        positions = [
+            float(position) * multiplier
+            for multiplier in self.gripper_joint_multipliers
+        ]
+
         traj = JointTrajectory()
-        traj.joint_names = [self.gripper_joint_name]
+        traj.joint_names = list(self.gripper_joint_names)
 
         point = JointTrajectoryPoint()
-        point.positions = [float(position)]
-        point.velocities = [0.0]
+        point.positions = positions
+        point.velocities = [0.0] * len(positions)
         motion_time = max(0.1, self.gripper_motion_time_sec)
         motion_sec = int(motion_time)
         motion_nanosec = int((motion_time - motion_sec) * 1e9)
@@ -410,6 +534,8 @@ class MoveToPregraspNode(Node):
         self.get_logger().info(
             f'Gripper command done: position={position:.3f} '
             f'({"close" if position > 0.02 else "open"}), '
+            f'joint_positions='
+            f'{[round(v, 4) for v in positions]}, '
             f'status={result_wrapper.status}, '
             f'error_code={result.error_code}, '
             f'error_string="{result.error_string}"'
@@ -439,6 +565,7 @@ class MoveToPregraspNode(Node):
             roll_deg=self.grasp_roll_deg,
             pitch_deg=self.grasp_pitch_deg,
             yaw_deg=self.grasp_yaw_deg,
+            reference_offset_xyz=self.grasp_reference_offset_xyz,
         )
 
         position = [
@@ -457,9 +584,12 @@ class MoveToPregraspNode(Node):
         self.get_logger().info(
             f'Executing pregrasp → position={[f"{v:.3f}" for v in position]}, '
             f'frame={frame_id}, '
+            f'cartesian={self.pregrasp_cartesian}, '
             f'grasp_rpy=({self.grasp_roll_deg:.0f}°,'
             f'{self.grasp_pitch_deg:.0f}°,'
             f'{self.grasp_yaw_deg:.0f}°), '
+            f'reference_offset='
+            f'{[round(v, 4) for v in self.grasp_reference_offset_xyz]}, '
             f'quat_xyzw={[f"{v:.3f}" for v in quat_xyzw]}'
         )
 
@@ -470,7 +600,9 @@ class MoveToPregraspNode(Node):
                 frame_id=frame_id,
                 tolerance_position=self.position_tolerance,
                 tolerance_orientation=self.orientation_tolerance,
-                cartesian=self.cartesian,
+                cartesian=self.pregrasp_cartesian,
+                cartesian_max_step=self.cartesian_max_step,
+                cartesian_fraction_threshold=self.cartesian_fraction_threshold,
             )
             ok = self.moveit2.wait_until_executed()
             if not ok:
@@ -509,28 +641,71 @@ class MoveToPregraspNode(Node):
 
         self.get_logger().info(
             f'Executing goal pose → position={[f"{v:.3f}" for v in position]}, '
-            f'frame={frame_id}'
+            f'frame={frame_id}, '
+            f'cartesian={self.goal_pose_cartesian}'
         )
 
         try:
-            self.moveit2.move_to_pose(
+            ok = self._move_to_pose(
                 position=position,
                 quat_xyzw=quat_xyzw,
                 frame_id=frame_id,
-                tolerance_position=self.position_tolerance,
-                tolerance_orientation=self.orientation_tolerance,
-                cartesian=self.cartesian,
+                cartesian=self.goal_pose_cartesian,
             )
-            ok = self.moveit2.wait_until_executed()
-            if not ok:
-                self.get_logger().warn('Goal pose motion aborted or failed.')
-                return False
+            if ok:
+                self.get_logger().info('Goal pose motion completed successfully.')
+                return True
 
-            self.get_logger().info('Goal pose motion completed successfully.')
-            return ok
+            fallback_allowed = (
+                self.goal_pose_joint_fallback
+                and position[2] >= self.goal_pose_joint_fallback_min_z
+            )
+            if self.goal_pose_cartesian and fallback_allowed:
+                self.get_logger().warn(
+                    'Goal pose Cartesian motion failed; retrying with joint-space planning.'
+                )
+                ok = self._move_to_pose(
+                    position=position,
+                    quat_xyzw=quat_xyzw,
+                    frame_id=frame_id,
+                    cartesian=False,
+                )
+                if ok:
+                    self.get_logger().info(
+                        'Goal pose joint-space fallback completed successfully.'
+                    )
+                    return True
+            elif self.goal_pose_cartesian and self.goal_pose_joint_fallback:
+                self.get_logger().warn(
+                    'Goal pose joint-space fallback disabled below '
+                    f'z={self.goal_pose_joint_fallback_min_z:.3f}; '
+                    'keeping low grasp approach Cartesian-only.'
+                )
+
+            self.get_logger().warn('Goal pose motion aborted or failed.')
+            return False
         except Exception as e:
             self.get_logger().error(f'Goal pose motion failed: {e}')
             return False
+
+    def _move_to_pose(
+        self,
+        position,
+        quat_xyzw,
+        frame_id: str,
+        cartesian: bool,
+    ) -> bool:
+        self.moveit2.move_to_pose(
+            position=position,
+            quat_xyzw=quat_xyzw,
+            frame_id=frame_id,
+            tolerance_position=self.position_tolerance,
+            tolerance_orientation=self.orientation_tolerance,
+            cartesian=cartesian,
+            cartesian_max_step=self.cartesian_max_step,
+            cartesian_fraction_threshold=self.cartesian_fraction_threshold,
+        )
+        return self.moveit2.wait_until_executed()
 
     # ------------------------------------------------------------------
     # Main loop
@@ -599,5 +774,12 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass

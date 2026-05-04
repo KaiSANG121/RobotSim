@@ -14,29 +14,58 @@ fi
 
 # Gazebo 模型资源路径（纯 Alicia-D）
 export GZ_SIM_RESOURCE_PATH="${ROBOTSIM_DIR}/alicia_gz_sim/models:${GZ_SIM_RESOURCE_PATH:-}"
-export IGN_GAZEBO_RESOURCE_PATH="${GZ_SIM_RESOURCE_PATH}"
 
 # 让 Gazebo 能找到 alicia_d_descriptions 安装后的 share（包含 mesh）
 if [ -d "${ROBOTSIM_DIR}/install/alicia_d_descriptions/share" ]; then
     export GZ_SIM_RESOURCE_PATH="${ROBOTSIM_DIR}/install/alicia_d_descriptions/share:${GZ_SIM_RESOURCE_PATH}"
 fi
+export IGN_GAZEBO_RESOURCE_PATH="${GZ_SIM_RESOURCE_PATH}"
+
+# Keep ROS launch/runtime logs inside the workspace so remote/headless tests are
+# easy to collect and do not depend on write access to ~/.ros.
+export ROS_LOG_DIR="${ROBOTSIM_ROS_LOG_DIR:-${ROBOTSIM_DIR}/log/ros}"
 
 # ----------------------------------------------------------------------
-# WSL2 集显软件渲染配置 (Mesa llvmpipe + OGRE1)
-#   - 集显在 WSLg 下没有 GPU 直通时回退到 kms_swrast,
-#     OGRE2 的 GL3Plus 后端在 mipmap 生成路径上崩溃。
-#   - 强制走纯软件渲染 (LIBGL_ALWAYS_SOFTWARE) + Qt 软件后端,
-#     配合 bin_scene.sdf 中切到 ogre1 渲染引擎,可在集显环境下稳定运行。
-#   - 如果你的机器有可用 GPU 直通 (`/dev/dri/renderD128` 可读),
-#     可以把这一段注释掉以获得更好性能。
+# Rendering profile
+#
+# ROBOTSIM_RENDERING=auto      默认。WSL2 走软件渲染, 其他 Linux/Jetson 走 GPU。
+# ROBOTSIM_RENDERING=software  强制 Mesa llvmpipe + Qt software, 用于 WSL2/虚拟机。
+# ROBOTSIM_RENDERING=gpu       取消 WSL2 软件渲染变量, 用于 Jetson/独显机器。
 # ----------------------------------------------------------------------
-export LIBGL_ALWAYS_SOFTWARE=1
-export OGRE_RTT_MODE=Copy
-export QT_QUICK_BACKEND=software
-export MESA_GL_VERSION_OVERRIDE=3.3
+ROBOTSIM_RENDERING="${ROBOTSIM_RENDERING:-auto}"
+ROBOTSIM_RENDERING_ACTIVE="${ROBOTSIM_RENDERING}"
+
+if [ "${ROBOTSIM_RENDERING}" = "auto" ]; then
+    if grep -qi "microsoft" /proc/version 2>/dev/null; then
+        ROBOTSIM_RENDERING_ACTIVE="software"
+    else
+        ROBOTSIM_RENDERING_ACTIVE="gpu"
+    fi
+fi
+
+case "${ROBOTSIM_RENDERING_ACTIVE}" in
+    software)
+        export LIBGL_ALWAYS_SOFTWARE=1
+        export OGRE_RTT_MODE=Copy
+        export QT_QUICK_BACKEND=software
+        export MESA_GL_VERSION_OVERRIDE=3.3
+        ;;
+    gpu)
+        unset LIBGL_ALWAYS_SOFTWARE
+        unset OGRE_RTT_MODE
+        unset QT_QUICK_BACKEND
+        unset MESA_GL_VERSION_OVERRIDE
+        ;;
+    *)
+        echo "[RobotSim] Unknown ROBOTSIM_RENDERING=${ROBOTSIM_RENDERING}; expected auto/software/gpu."
+        echo "[RobotSim] Leaving existing rendering environment unchanged."
+        ;;
+esac
 
 echo "[RobotSim] Environment configured."
 echo "  ROS_DISTRO    = ${ROS_DISTRO}"
 echo "  ROBOTSIM_DIR  = ${ROBOTSIM_DIR}"
 echo "  GZ_SIM_RESOURCE_PATH = ${GZ_SIM_RESOURCE_PATH}"
-echo "  Software rendering: LIBGL_ALWAYS_SOFTWARE=${LIBGL_ALWAYS_SOFTWARE}"
+echo "  ROS_LOG_DIR = ${ROS_LOG_DIR}"
+echo "  ROBOTSIM_RENDERING = ${ROBOTSIM_RENDERING_ACTIVE}"
+echo "  LIBGL_ALWAYS_SOFTWARE = ${LIBGL_ALWAYS_SOFTWARE:-unset}"

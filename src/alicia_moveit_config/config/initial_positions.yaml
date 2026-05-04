@@ -8,3 +8,4 @@ initial_positions:
   Joint5: 0
   Joint6: 0
   Gripper: 0
+  right_finger: 0
