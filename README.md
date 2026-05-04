@@ -221,44 +221,87 @@ ros2 launch perception_mvp task_demo.launch.py \
   gripper_approach_position:=0.012
 ```
 
-## 在 Jetson Nano 上看 RViz
+## 在 Jetson Nano 上看仿真
 
-Nano 接显示器后, 把 `use_rviz:=true` 让 RViz 直接在本地启动。Gazebo GUI 在 Nano 上比较吃 GPU,
-仍然推荐 `headless:=true` 让 Gazebo 跑 server-only, 由 RViz 负责可视化。
+`sim_demo.launch.py` 暴露了三个开关，按需要的可视化方式组合：
+
+| 参数 | 作用 |
+| --- | --- |
+| `use_rviz:=true/false` | 启不启动 RViz |
+| `headless:=true/false` | `true` 时 Gazebo 只跑 server (无窗口)，`false` 时弹出 Gazebo Sim GUI |
+| `render_engine:=auto/ogre/ogre2` | `auto` 在 Jetson/独显机器走 `ogre2`、WSL2 软件渲染走 `ogre` |
+
+每次启动前先清残留进程：
 
 ```bash
 cd ~/RobotSim
 source setup_env.sh
 source install/setup.bash
 bash cleanup.sh
+```
 
+### 方案 A：只开 RViz（推荐）
+
+Gazebo 跑 server-only，仿真画面由 RViz 负责，对 Nano GPU 最友好：
+
+```bash
 ros2 launch alicia_moveit_config sim_demo.launch.py \
   use_rviz:=true \
   headless:=true \
   render_engine:=auto
 ```
 
-看到 `You can start planning now!` 后, 在另一个终端起任务:
+### 方案 B：开 Gazebo GUI（可选）
+
+如果想直接看 Gazebo 里的 collision / contact / 物理交互（例如夹爪 pad 与物体的接触面）：
 
 ```bash
-cd ~/RobotSim
-source setup_env.sh
-source install/setup.bash
+ros2 launch alicia_moveit_config sim_demo.launch.py \
+  use_rviz:=true \
+  headless:=false \
+  render_engine:=auto
+```
+
+Gazebo Sim 窗口会和 RViz 一起开。Nano 上 ogre2 + Qt GUI 比较吃 GPU，
+帧率会有掉，但物理仍然在跑。如果只想看 Gazebo 不要 RViz，把 `use_rviz:=false`。
+
+打开 Gazebo Sim 后，左侧面板的 `Plugins` → `Visualize Contacts` 可以可视化 finger pad 和物体的接触点；
+顶部菜单 `View → Collisions` 可以叠加显示 collision geometry，对调下爪深度很有用。
+
+> Nano 没接显示器、远程登录时：不要用 X-forwarding 跑 RViz/Gazebo Sim（OpenGL 上下文经常崩），
+> 在 Nano 本机起一个 VNC server，客户端连进去看本机渲染的窗口更稳。
+
+### 等待 + 起任务
+
+任一方案启动后，等到 sim_demo 终端日志出现 `You can start planning now!`，
+另一个终端起任务（默认序列 `red_cylinder → yellow_box → brown_cube`）：
+
+```bash
+source ~/RobotSim/setup_env.sh
+source ~/RobotSim/install/setup.bash
 
 ros2 launch perception_mvp task_demo.launch.py \
-  target_sequence:="['red_cylinder','yellow_box','brown_cube']" \
   grasp_mode:=physical \
   grasp_style:=top_down
 ```
 
-RViz 中默认就有 `RobotModel`、`PlanningScene`、`TF` 显示项。手动加这几个看抓取闭环很直观:
+要换抓取顺序就显式传：
 
-- `Marker` → topic `/perception/target_marker`, 每个目标会出现一个彩色小球, 颜色对应 red/yellow/brown
-- `MotionPlanning` 面板 → Planning Group 选 `Alicia` 可以看 MoveIt 规划轨迹
-- 跟进状态机: 终端里 `ros2 topic echo /task/state` 和 `ros2 topic echo /task/status_text`
+```bash
+ros2 launch perception_mvp task_demo.launch.py \
+  target_sequence:="['brown_cube','yellow_box','red_cylinder']" \
+  grasp_mode:=physical \
+  grasp_style:=top_down
+```
 
-如果 Nano 没接显示器, 远端 SSH 看 RViz 推荐用 VNC 而不是 X-forwarding —— RViz 的 OpenGL 上下文在
-X-forwarding 下经常崩。VNC 服务跑在 Nano 上, 用客户端连进去看本机渲染的 RViz 即可。
+### RViz 里看什么
+
+默认 `demo.rviz` 已经把 `RobotModel`、`PlanningScene`、`TF` 加好了。手动再加两个：
+
+- `Marker` → topic `/perception/target_marker`：当前目标会有一颗彩色小球叠在物体上方
+- `MotionPlanning` 面板 → Planning Group 选 `Alicia`：可以看 MoveIt 规划出的轨迹
+
+第三个终端 `ros2 topic echo /task/state` / `ros2 topic echo /task/status_text` 配着看状态机推进。
 
 ## 常用观察命令
 
@@ -301,4 +344,4 @@ grasp_reference_offset_xyz:="[0.0,0.0,0.0]"
 grasp_position_offset_xyz:="[0.0,0.0,0.0]"
 ```
 
-最后更新：2026-05-03
+最后更新：2026-05-04
