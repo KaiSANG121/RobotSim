@@ -29,7 +29,6 @@
 | `task_state_machine_node` | `perception_mvp` | 顺序遍历 `target_sequence`，发布每一阶段的目标位姿 / 夹爪命令，并在事件超时或失败时进入 declutter / retry |
 | `move_group` | MoveIt 2 | 加载 `alicia_moveit_config` 的 SRDF / kinematics / planning_pipelines，提供 OMPL + Pilz 规划 |
 
-`virtual_grasp_node` 仅在 `grasp_mode:=virtual` 时启动，本项目主线（physical）不使用。
 
 ### 1.3 状态机
 
@@ -48,7 +47,7 @@
 - Gazebo Fortress / Ignition
 - MoveIt 2
 - Python 3.10
-- 已验证平台：x86_64 桌面 / Jetson Nano（建议 4 GB+ swap）
+- 已验证平台：x86_64 桌面 / Jetson Nano（注：虚拟机或wsl可能会比较吃力）
 
 ### 2.2 首次安装依赖
 
@@ -56,8 +55,13 @@
 sudo apt update
 sudo apt install -y \
   git \
+  build-essential \
   python3-colcon-common-extensions \
   python3-pip \
+  python3-rosdep \
+  python3-vcstool \
+  python3-opencv \
+  python3-numpy \
   ros-humble-moveit \
   ros-humble-gz-ros2-control \
   ros-humble-ros-gz-bridge \
@@ -68,9 +72,11 @@ sudo apt install -y \
   ros-humble-robot-state-publisher \
   ros-humble-xacro \
   ros-humble-rviz2 \
-  ros-humble-tf2-ros
+  ros-humble-tf2-ros \
+  ros-humble-tf-transformations \
+  ros-humble-cv-bridge \
+  ros-humble-image-transport
 
-pip3 install pymoveit2
 ```
 
 ### 2.3 编译
@@ -84,13 +90,6 @@ source install/setup.bash
 
 `setup_env.sh` 同时设置 `GZ_SIM_RESOURCE_PATH`、`ROS_LOG_DIR` 与渲染环境（自动检测 WSL2 / Jetson / 独显）。
 
-可选静态自检：
-
-```bash
-python3 -m py_compile src/perception_mvp/perception_mvp/*.py src/perception_mvp/launch/task_demo.launch.py
-ign sdf -k alicia_gz_sim/worlds/bin_scene.sdf
-xacro src/alicia_moveit_config/config/Alicia_D_v5_6_gripper_100mm.urdf.xacro > /dev/null
-```
 
 ### 2.4 启动
 
@@ -161,7 +160,7 @@ ros2 launch perception_mvp task_demo.launch.py \
 | --- | --- | --- |
 | `grasp_mode` | `virtual` | 物理抓取必须显式置为 `physical` |
 | `grasp_style` | `auto` | `physical+auto` 当前解析为 `strict_top_down`；本项目主线显式用 `top_down` |
-| `target_sequence` | `['red_cylinder','yellow_box','brown_cube']` | Python list 字面量 |
+| `target_sequence` | `['red_cylinder',   'yellow_box',   'brown_cube']` | Python list 字面量 |
 | `pregrasp_height` | `auto` (`0.20`) | 目标上方等待高度 |
 | `grasp_height_offsets` | `auto` | 按目标几何自动给值 |
 | `gripper_close_position` | `auto` (`0.040`) | 夹紧时 prismatic 行程 |
