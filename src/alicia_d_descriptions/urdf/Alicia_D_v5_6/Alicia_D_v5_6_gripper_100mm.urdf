@@ -513,8 +513,8 @@
     <mimic joint="Gripper" multiplier="-1" offset="0"/>
   </joint>
   <gazebo reference="left_gripper">
-    <mu1>4.0</mu1>
-    <mu2>4.0</mu2>
+    <mu1>8.0</mu1>
+    <mu2>8.0</mu2>
     <slip1>0.0</slip1>
     <slip2>0.0</slip2>
     <kp>200000.0</kp>
@@ -523,8 +523,8 @@
     <minDepth>0.001</minDepth>
   </gazebo>
   <gazebo reference="right_gripper">
-    <mu1>4.0</mu1>
-    <mu2>4.0</mu2>
+    <mu1>8.0</mu1>
+    <mu2>8.0</mu2>
     <slip1>0.0</slip1>
     <slip2>0.0</slip2>
     <kp>200000.0</kp>

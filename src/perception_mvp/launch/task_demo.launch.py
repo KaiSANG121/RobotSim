@@ -10,8 +10,16 @@ DEFAULT_TARGET_SEQUENCE = ["red_cylinder", "yellow_box", "brown_cube"]
 
 TOP_DOWN_GRASP_HEIGHT_OFFSETS = {
     "red_cylinder": -0.075,
-    "yellow_box": -0.040,
-    "brown_cube": -0.040,
+    "yellow_box": -0.050,
+    "brown_cube": -0.033,
+}
+
+# strict_top_down: vertical approach [180,0,90], finger pads parallel to object face
+# → full area contact on flat sides, eliminates pendulum wobble
+STRICT_TOP_DOWN_GRASP_HEIGHT_OFFSETS = {
+    "red_cylinder": -0.075,   # unchanged from top_down, proven to work
+    "yellow_box": -0.050,     # pad center at box center z=0.050
+    "brown_cube": -0.033,     # pad center at cube center z=0.033
 }
 
 DEFAULT_PLACE_SLOTS_XYZ = {
@@ -42,7 +50,7 @@ def default_grasp_height_offset(target_name, grasp_mode, grasp_style):
     if grasp_mode == "physical" and grasp_style == "top_down":
         return TOP_DOWN_GRASP_HEIGHT_OFFSETS.get(target_name, -0.045)
     if grasp_mode == "physical" and grasp_style == "strict_top_down":
-        return -0.075
+        return STRICT_TOP_DOWN_GRASP_HEIGHT_OFFSETS.get(target_name, -0.075)
     if grasp_mode == "physical" and grasp_style == "side":
         return -0.045
     return 0.035
@@ -65,7 +73,7 @@ def launch_setup(context, *args, **kwargs):
     if grasp_style not in ("auto", "side", "top_down", "strict_top_down"):
         grasp_style = "auto"
     if grasp_style == "auto":
-        grasp_style = "top_down" if grasp_mode == "physical" else "side"
+        grasp_style = "strict_top_down" if grasp_mode == "physical" else "side"
 
     legacy_virtual_grasp = (
         LaunchConfiguration("virtual_grasp").perform(context).lower() == "true"
@@ -142,7 +150,7 @@ def launch_setup(context, *args, **kwargs):
         if top_down_physical:
             gripper_close_position = 0.040
         elif strict_top_down_physical:
-            gripper_close_position = 0.020
+            gripper_close_position = 0.030
         elif side_physical:
             gripper_close_position = 0.030
         else:
@@ -378,7 +386,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "grasp_rpy_deg",
             default_value="auto",
-            description="auto: [180,90,0] except strict_top_down uses [180,0,90]",
+            description="auto: [180,0,90] for physical strict_top_down (vertical), [180,40,0] for top_down",
         ),
         DeclareLaunchArgument(
             "goal_pose_joint_fallback",
